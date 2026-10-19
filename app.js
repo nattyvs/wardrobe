@@ -16,7 +16,7 @@ const S = {
   closet: cache.closet || null,
   log: cache.log || null,
   plan: cache.plan || null,
-  state: Object.assign({dayOcc:{}, swaps:{}, edits:{}, onRepeat:{}, ruleOff:{}}, cache.state || {}),
+  state: Object.assign({dayOcc:{}, swaps:{}, edits:{}, onRepeat:{}, ruleOff:{}, modes:{}}, cache.state || {}),
   trips: cache.trips || [],
   palette: cache.palette || null,
   style: Object.assign({loves:{}, looks:[], inspo:[], rules:[]}, cache.style || {}),
@@ -357,12 +357,12 @@ function hueClose(a, b){
   const x = hueOf(a.hex), y = hueOf(b.hex); if(x==null || y==null) return false;
   const d = Math.abs(x-y); return Math.min(d, 360-d) <= 45;
 }
-function buildOutfit(date, opts){
+function buildOne(date, opts){
   opts = opts || {};
   const scope = opts.scope !== undefined ? opts.scope : tripScope(date);
   const o = occasionFor(date).occ, w = wx(date), t = w ? w.feel : 12, need = band(t);
   const st = stats(date), R = rules();
-  const pool = closet().filter(p=>usable(p, !!scope) && (scope ? scope.has(p.id) : (!p.occasions || !p.occasions.length || p.occasions.includes(o) || (o==='home' && (p.occasions.includes('off') || p.occasions.includes('office'))))));
+  const pool = closet().filter(p=>!(opts.exclude && opts.exclude.has(p.id)) && usable(p, !!scope) && (scope ? scope.has(p.id) : (!p.occasions || !p.occasions.length || p.occasions.includes(o) || (o==='home' && (p.occasions.includes('off') || p.occasions.includes('office'))))));
   const recentDays = id => {
     if(onRepeatSince(id, date)) return 2; // on repeat counts as worn in the last few days
     let l = st[id] && st[id].last; const pl = opts.planned && opts.planned[id];
@@ -389,7 +389,7 @@ function buildOutfit(date, opts){
     if(R.loved[p.id]) s += 0.8;
     if(loved(p.id)) s += 0.6; // a piece she has said she loves
     s += faceBonus(p, slot);
-    s += hash(date+p.id)*0.35;
+    s += hash(date+p.id+(opts.seed||''))*(opts.seed ? 1.6 : 0.35);
     return s;
   }
   const by = k => pool.filter(p=>slotOf(p)===k);
@@ -412,7 +412,7 @@ function buildOutfit(date, opts){
   };
   // The hero: the most neglected piece that suits today.
   const suitable = pool.filter(p=>['outer','top','dress','bottom','shoes','accessory'].includes(slotOf(p)) && (p.cat!=='outer' || need>=2)).map(p=>({p, s: score(p, slotOf(p)) + (recentDays(p.id)===999?1:Math.min(recentDays(p.id),120)/30)})).sort((a,b)=>b.s-a.s);
-  const hero = hasHistory() && suitable[0] && recentDays(suitable[0].p.id) >= 45 ? suitable[0].p : null;
+  const hero = opts.hero ? opts.hero : opts.noHero ? null : hasHistory() && suitable[0] && recentDays(suitable[0].p.id) >= 45 ? suitable[0].p : null;
   const chosen = hero ? [hero] : [];
   const slots = {};
   if(hero) slots[slotOf(hero)] = hero;
@@ -438,6 +438,161 @@ function buildOutfit(date, opts){
   return {slots, hero, temp:t, need, occ:o, scope:!!scope};
 }
 const SLOT_ORDER = ['outer','top','dress','bottom','belt','shoes','accessory','bag'];
+/* ---------------- look scoring: six factors, learned weights, three modes ----------------
+   Each candidate look gets a 0–1 score per factor. The weights start from a stylist's guess and move with
+   Natalia's ratings. Same colour head to toe is not the same as a coherent look, so matching alone never scores top. */
+const FACTORS = [['colour','Colour harmony'],['silhouette','Silhouette and proportion'],['coherence','Style coherence'],['texture','Texture and print'],['preference','Your preference'],['rotation','Wardrobe rotation']];
+const DEFAULT_W = {colour:.20, silhouette:.25, coherence:.20, texture:.10, preference:.15, rotation:.10};
+const MODES = {reliable:'Reliable', rediscover:'Rediscover', push:'Push my style'};
+function weights(){ const w = Object.assign({}, DEFAULT_W, (S.style && S.style.weights) || {}); const t = Object.values(w).reduce((a,b)=>a+b,0)||1; Object.keys(w).forEach(k=>w[k]/=t); return w; }
+const modeFor = date => (S.state.modes && S.state.modes[date]) || 'reliable';
+function lightOf(hex){ const m = /^#?([0-9a-f]{6})$/i.exec(hex||''); if(!m) return .5; const n = parseInt(m[1],16); return (Math.max(n>>16&255, n>>8&255, n&255) + Math.min(n>>16&255, n>>8&255, n&255))/510; }
+const isNeutralP = p => NEUTRAL.test((p.colour||'').toLowerCase()) || hueOf(p.hex)==null;
+const volOf = p => { const f = {fitted:0, regular:1, relaxed:2, oversized:3}[p.fit]; let v = f==null ? 1 : f; if(p.leg==='wide') v = Math.max(v, 2); if(FULL(p)) v = Math.max(v, 2); return v; };
+const tagsOf = p => p.styleTags && p.styleTags.length ? p.styleTags : [];
+function ratedPairs(){
+  if(S.ui.memo.rated) return S.ui.memo.rated;
+  const up = new Set(), down = new Set();
+  ((S.style && S.style.ratings) || []).forEach(r=>{ const ids = r.items||[]; ids.forEach(a=>ids.forEach(b=>{ if(a<b) (r.y ? up : down).add(a+'|'+b); })); });
+  return (S.ui.memo.rated = {up, down});
+}
+function lookScore(slots, date, opts){
+  opts = opts || {};
+  const all = SLOT_ORDER.map(k=>slots[k]).filter(Boolean);
+  const clothes = all.filter(p=>!['belt','bag'].includes(slotOf(p)));
+  const f = {}, note = {};
+  // Colour: one lead colour, tonal done with contrast, never just matching.
+  const accents = clothes.filter(p=>!isNeutralP(p) && p.pattern!=='large');
+  const lead = accents[0];
+  if(!accents.length){
+    const sameNeutral = clothes.length>1 && clothes.every(p=>(p.colour||'')===(clothes[0].colour||''));
+    f.colour = sameNeutral ? .5 : .65; note.colour = sameNeutral ? `All ${clothes[0].colour}: strong, but it needs texture to work.` : 'Quiet neutrals, so the shapes do the talking.';
+  } else if(accents.length===1){
+    f.colour = .9; note.colour = `${cap1((lead.colour||'').toLowerCase())} leads; everything else stays quiet.`;
+  } else {
+    const pairs = []; for(let i=0;i<accents.length;i++) for(let j=i+1;j<accents.length;j++) pairs.push([accents[i],accents[j]]);
+    const close = pairs.every(([a,b])=>hueClose(a,b));
+    const spread = Math.max(...accents.map(p=>lightOf(p.hex))) - Math.min(...accents.map(p=>lightOf(p.hex)));
+    if(accents.length>=3 && !close){ f.colour = .25; note.colour = 'Three colours competing.'; }
+    else if(close && spread>=.12){ f.colour = .95; note.colour = `Tonal ${(lead.colour||'').toLowerCase()}, with light and dark shades for depth.`; }
+    else if(close){ f.colour = .6; note.colour = 'Tonal but very matched; a texture change would help.'; }
+    else { const d = (()=>{ const x = hueOf(accents[0].hex), y = hueOf(accents[1].hex); if(x==null||y==null) return 90; const e = Math.abs(x-y); return Math.min(e, 360-e); })();
+      f.colour = d>=150 ? .6 : .35; note.colour = d>=150 ? 'A deliberate contrast of two colours.' : 'Two colours that pull against each other.'; }
+  }
+  // Silhouette: balance volume, mind lengths.
+  let sil = 1, sn = '';
+  const top = slots.top, bot = slots.bottom, dress = slots.dress, outer = slots.outer;
+  if(top && bot){
+    const vt = volOf(top), vb = volOf(bot);
+    if(vt>=2 && vb>=2 && !['cropped','waist'].includes(top.length)){ sil -= .45; sn = 'Volume top and bottom; it can swamp you.'; }
+    else if(vt>=2 && vb>=2){ sil -= .15; sn = 'A short loose top keeps the wide shape balanced.'; }
+    else if(vb>=2 && vt<=1){ sn = `A ${top.fit==='fitted'?'fitted':'neat'} top balances the ${bot.leg==='wide'?'wide leg':'fuller skirt'}.`; }
+    else if(vt>=2 && vb<=1){ sn = `Loose on top, slim below: an easy proportion.`; }
+    else { sil -= .1; sn = 'Neat top and bottom; clean, if a little plain.'; }
+    if(top.length==='long' && ['midi','maxi'].includes(bot.length)){ sil -= .25; sn = 'A long top over a long skirt shortens the leg line.'; }
+  }
+  if(outer && (bot || dress)){
+    const under = bot || dress;
+    if(BULKY(outer) && FULL(under)){ sil -= .3; sn = sn || 'A bulky jacket over a full skirt.'; }
+    if(outer.length==='long' && under.length==='maxi'){ sil -= .1; }
+  }
+  if(dress && outer && BULKY(outer) && volOf(dress)>=2) sil -= .2;
+  f.silhouette = clamp(sil, 0, 1); note.silhouette = sn;
+  // Coherence: pieces share a direction; one deliberate twist is fine.
+  const tagged = clothes.filter(p=>tagsOf(p).length);
+  if(tagged.length<2){ f.coherence = .6; note.coherence = ''; }
+  else {
+    const cnt = {}; tagged.forEach(p=>tagsOf(p).forEach(t=>cnt[t]=(cnt[t]||0)+1));
+    const ranked = Object.entries(cnt).sort((a,b)=>b[1]-a[1]);
+    const share = ranked[0][1]/tagged.length;
+    const twist = ranked[1] && ranked[1][1]>=1 && ranked[1][1] < ranked[0][1];
+    f.coherence = share>=.66 ? (twist ? 1 : .9) : share>=.5 ? .75 : .35;
+    note.coherence = share>=.66 ? (twist ? `${cap1(ranked[0][0])} with a ${ranked[1][0]} twist.` : `A ${ranked[0][0]} look throughout.`) : share>=.5 ? `Mostly ${ranked[0][0]}.` : 'The pieces pull in different directions.';
+  }
+  // Texture and print: one bold print, or a small one with a big one; texture contrast lifts plain looks.
+  const prints = clothes.filter(p=>p.pattern && p.pattern!=='none');
+  const big = prints.filter(p=>p.pattern==='large').length;
+  const fabrics = new Set(clothes.map(p=>fabricOf(p).name).filter(Boolean));
+  if(!prints.length){ f.texture = fabrics.size>=2 ? .8 : .55; note.texture = fabrics.size>=2 ? `No print; ${[...fabrics].slice(0,2).join(' against ').toLowerCase()} gives it texture.` : 'Plain and one texture.'; }
+  else if(prints.length===1){ f.texture = .9; note.texture = `The ${prints[0].name.toLowerCase()} is the one print.`; }
+  else if(prints.length===2 && big<=1 && hueClose(prints[0], prints[1])){ f.texture = .7; note.texture = 'Two prints of different scale sharing a colour.'; }
+  else if(big>=2){ f.texture = .15; note.texture = 'Two bold prints fighting.'; }
+  else { f.texture = .4; note.texture = 'Two prints.'; }
+  // Preference: what she loves, rates and has worn together happily.
+  const rp = ratedPairs(); let pref = .5, pn = '';
+  const lovedN = clothes.filter(p=>loved(p.id)).length; pref += Math.min(.3, lovedN*.15); if(lovedN) pn = `${lovedN} piece${lovedN>1?'s':''} you love.`;
+  let upPairs = 0, downPairs = 0, lovedPair = false;
+  for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){ const a = all[i].id, b = all[j].id, k = a<b?a+'|'+b:b+'|'+a; if(rp.up.has(k)) upPairs++; if(rp.down.has(k)) downPairs++; if(pairLoved(a,b)) lovedPair = true; }
+  if(lovedPair){ pref += .2; pn = 'Builds on a look you loved.'; }
+  pref += Math.min(.2, upPairs*.05) - Math.min(.4, downPairs*.1);
+  if(clothes.some(p=>rules().avoid[p.id])) pref -= .3;
+  f.preference = clamp(pref, 0, 1); note.preference = pn;
+  // Rotation: credit for bringing back what hasn't been out.
+  const st = stats(date);
+  const ago = p => { if(onRepeatSince(p.id, date)) return 2; let l = st[p.id] && st[p.id].last; const pl = opts.planned && opts.planned[p.id]; if(pl && (!l || pl>l)) l = pl; return l ? daysBetween(l, date) : 999; };
+  f.rotation = hasHistory() ? clothes.reduce((a,p)=>a + (ago(p)===999 ? 1 : Math.min(ago(p),90)/90), 0)/Math.max(1, clothes.length) : .5;
+  note.rotation = '';
+  const w = weights(); if(opts.mode==='reliable'){ w.rotation *= .5; }
+  const total = FACTORS.reduce((a,[k])=>a + w[k]*f[k], 0);
+  return {f, note, total};
+}
+function lookKey(slots){ return SLOT_ORDER.map(k=>slots[k] ? slots[k].id : '').join('|'); }
+function noveltyOf(slots){
+  const all = SLOT_ORDER.map(k=>slots[k]).filter(Boolean); let seen = 0, n = 0;
+  const together = new Set(); log().filter(e=>e.source!=='sample').forEach(e=>{ const ids = e.items||[]; ids.forEach(a=>ids.forEach(b=>{ if(a<b) together.add(a+'|'+b); })); });
+  for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){ n++; const a = all[i].id, b = all[j].id; if(together.has(a<b?a+'|'+b:b+'|'+a) || pairLoved(a,b)) seen++; }
+  const tags = new Set(all.flatMap(tagsOf));
+  return (n ? 1 - seen/n : 1) + Math.min(.4, tags.size*.1) + (all.some(p=>p.pattern && p.pattern!=='none') ? .15 : 0) + (all.some(p=>!isNeutralP(p)) ? .1 : 0);
+}
+function buildOutfit(date, opts){
+  opts = opts || {};
+  if(opts.fast) return buildOne(date, opts);
+  const mode = opts.mode || modeFor(date);
+  const cands = [], seen = new Set();
+  const add = r => { const k = lookKey(r.slots); if(seen.has(k)) return; seen.add(k); r.score = lookScore(r.slots, date, {planned:opts.planned, mode}); cands.push(r); };
+  for(let i=0; i<16; i++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed: i ? 'v'+i : ''})));
+  const best = arr => arr.slice().sort((a,b)=>b.score.total-a.score.total)[0];
+  // A second pass leaves out the first choice's main pieces, so the shortlist has real alternatives.
+  const first = best(cands), main = ['top','dress','bottom','outer','shoes'].map(k=>first.slots[k]).filter(Boolean);
+  main.forEach((m,i)=>{ for(let j=0;j<2;j++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed:'x'+i+j, exclude:new Set([m.id])}))); });
+  if(main.length>=2) for(let j=0;j<3;j++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed:'y'+j, exclude:new Set(main.slice(0,3).map(p=>p.id))})));
+  let pick = best(cands), fallback = '';
+  if(mode==='rediscover'){
+    // Start from what's been out least (or, before there's history, what isn't loved or on repeat) and only keep it if the look holds up.
+    const st = stats(date);
+    const pool = closet().filter(p=>usable(p, !!opts.scope) && ['top','dress','bottom','outer','shoes','accessory'].includes(slotOf(p)) && (!opts.scope || opts.scope.has(p.id)) && (!p.occasions || !p.occasions.length || p.occasions.includes(occasionFor(date).occ) || (occasionFor(date).occ==='home' && (p.occasions.includes('off') || p.occasions.includes('office')))));
+    const restScore = p => { const l = st[p.id] && st[p.id].last; return (l ? Math.min(daysBetween(l,date),180) : 365) - (loved(p.id)?60:0) - (onRepeatSince(p.id,date)?300:0) + hash(date+p.id)*20; };
+    const heroes = pool.sort((a,b)=>restScore(b)-restScore(a)).slice(0,6);
+    const hc = [];
+    heroes.forEach(h=>{ for(let i=0;i<3;i++){ const r = buildOne(date, Object.assign({}, opts, {hero:h, seed:'h'+i})); const k = lookKey(r.slots); if(seen.has(k)) continue; seen.add(k); r.score = lookScore(r.slots, date, {planned:opts.planned, mode}); r.hero = h; hc.push(r); cands.push(r); } });
+    const hb = best(hc);
+    if(hb && hb.score.total >= pick.score.total*0.88) pick = hb;
+    else fallback = 'Nothing rarely worn made a convincing look today, so this is the reliable one.';
+  } else if(mode==='push'){
+    const floor = pick.score.total*0.8;
+    // Something different from the safe pick, but still a look that holds together.
+    const safeKey = lookKey(pick.slots);
+    const safeIds = new Set(SLOT_ORDER.map(k=>pick.slots[k]).filter(Boolean).map(p=>p.id));
+    const differs = c => ['top','dress','bottom','outer','shoes'].filter(k=>c.slots[k] && !safeIds.has(c.slots[k].id)).length >= 2;
+    const ok = cands.filter(c=>lookKey(c.slots)!==safeKey && differs(c) && c.score.total>=floor && c.score.f.silhouette>=.5 && c.score.f.colour>=.5);
+    pick = ok.sort((a,b)=>(noveltyOf(b.slots)*.6+b.score.total)-(noveltyOf(a.slots)*.6+a.score.total))[0] || pick;
+  }
+  pick.mode = mode; pick.fallback = fallback;
+  return pick;
+}
+function rateLook(date, y){
+  const o = outfitFor(date); if(!o || !o.list || !o.list.length) return;
+  const sc = o.score || lookScore(o.slots, date, {mode:o.mode});
+  const items = o.list.map(x=>x.p.id);
+  S.style.ratings = ((S.style.ratings||[]).filter(r=>r.date!==date)).concat([{date, items, y, mode:o.mode||'reliable', f:sc.f, at:Date.now()}]);
+  // Learn: move weight towards the factors that were high in looks she liked, away from them in looks she didn't.
+  const w = weights(), mean = FACTORS.reduce((a,[k])=>a+sc.f[k],0)/FACTORS.length, pred = sc.total;
+  FACTORS.forEach(([k])=>{ w[k] = Math.max(.03, w[k] + 0.08*((y?1:0) - pred)*(sc.f[k]-mean)); });
+  const t = Object.values(w).reduce((a,b)=>a+b,0); Object.keys(w).forEach(k=>w[k] = Math.round(w[k]/t*1000)/1000);
+  S.style.weights = w;
+  queuePush({style:true});
+}
+const ratingFor = date => ((S.style && S.style.ratings) || []).find(r=>r.date===date);
 function applySwaps(res, date){
   const sw = S.state.swaps[date] || {};
   Object.entries(sw).forEach(([k,id])=>{ if(id===null) delete res.slots[k]; else { const p = piece(id); if(p) res.slots[k] = p; } });
@@ -489,7 +644,7 @@ function outfitFor(date){
     res = {slots, hero: pd.hero ? piece(pd.hero) : null, temp:t, need:band(t), occ:occasionFor(date).occ, why: pd.why};
     if(pd.tempAssumed!=null && w && band(t) !== band(pd.tempAssumed)){
       const colder = band(t) > band(pd.tempAssumed);
-      const alt = buildOutfit(date);
+      const alt = buildOutfit(date, {fast:true});
       ['outer','accessory'].forEach(k=>{
         const was = slots[k], now = alt.slots[k];
         if((was&&was.id)!==(now&&now.id)){
@@ -503,12 +658,20 @@ function outfitFor(date){
     res = Object.assign({}, m, {slots:Object.assign({}, m.slots)});
   } else res = buildOutfit(date);
   applySwaps(res, date);
+  if(S.state.swaps[date] && Object.keys(S.state.swaps[date]).length) res.score = lookScore(res.slots, date, {mode:res.mode});
   res.adjusted = adjusted; res.fromPlan = fromPlan;
   return res;
+}
+function styleWhy(o){
+  if(!o.score) return '';
+  const w = weights();
+  const ranked = ['colour','silhouette','coherence','texture','preference'].filter(k=>o.score.note[k]).sort((a,b)=>w[b]*o.score.f[b]-w[a]*o.score.f[a]);
+  return ranked.slice(0,2).map(k=>o.score.note[k]).join(' ');
 }
 function whyLine(o, date){
   if(o.why) return o.why;
   const st = stats(date), bits = [];
+  const sw = styleWhy(o); if(sw) bits.push(sw);
   if(o.hero && hasHistory()){ const l = st[o.hero.id] && st[o.hero.id].last; bits.push(l ? `The ${o.hero.name.toLowerCase()} hasn't been out since ${MONTHS[parse(l).getMonth()]}.` : `The ${o.hero.name.toLowerCase()} gets its first outing.`); }
   const warm = o.slots.outer || o.slots.top;
   if(warm && o.need>=3 && fabricOf(warm).name) bits.push(`${fabricOf(warm).name} for ${Math.round(o.temp)}°.`);
@@ -784,7 +947,7 @@ async function pull(){
   if(out.state){
     S.state.dayOcc = Object.assign({}, out.state.dayOcc||{}, S.state.dayOcc); S.state.swaps = Object.assign({}, out.state.swaps||{}, S.state.swaps);
     // A tap that was undone is kept as null, so an old copy on GitHub can't bring it back.
-    S.state.onRepeat = Object.assign({}, out.state.onRepeat||{}, S.state.onRepeat); S.state.ruleOff = Object.assign({}, out.state.ruleOff||{}, S.state.ruleOff);
+    S.state.onRepeat = Object.assign({}, out.state.onRepeat||{}, S.state.onRepeat); S.state.ruleOff = Object.assign({}, out.state.ruleOff||{}, S.state.ruleOff); S.state.modes = Object.assign({}, out.state.modes||{}, S.state.modes);
   }
   if(out.trips && out.trips.trips){
     const byId = {}; out.trips.trips.forEach(t=>byId[t.id]=t);
@@ -812,7 +975,7 @@ function queuePush(what){
     const w = queuePush.what; queuePush.what = {};
     try{
       if(w.log) await ghPut('data/wearlog.json', {entries:S.log.filter(e=>e.source!=='sample')}, 'Log what I wore');
-      if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff}, 'Update day settings');
+      if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes}, 'Update day settings');
       if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
       if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
       if(w.style){ const cur = await ghGet('data/style.json'); S.sha['data/style.json'] = cur.sha; if(cur.data && cur.data.rules) S.style.rules = cur.data.rules; await ghPut('data/style.json', S.style, 'Update style notes'); } // rules are Claude's, so keep whatever is on GitHub
@@ -902,11 +1065,16 @@ function viewDay(date, settle){
     <p class="why">${esc(whyLine(o, date))}</p>
     ${fnote?`<p class="caption facenote">${esc(fnote)}</p>`:''}
     ${o.adjusted?`<p class="adjusted">${esc(o.adjusted)}</p>`:''}
+    ${o.fallback?`<p class="caption">${esc(o.fallback)}</p>`:''}
   </div>
+  ${!o.logged && !o.fromPlan && !o.scope ? `<div class="modes segs" role="group" aria-label="Kind of look">${Object.entries(MODES).map(([k,l])=>`<button type="button" class="label" data-mode="${k}" data-date="${date}" aria-pressed="${k===(o.mode||modeFor(date))}">${l}</button>`).join('')}</div>` : ''}
   <div class="acts">${actions}</div>
+  ${o.list.length ? (()=>{ const rt = ratingFor(date); return `<div class="rate" role="group" aria-label="Rate this look"><span class="label">This look</span><button type="button" class="label" data-rate="1" data-date="${date}" aria-pressed="${!!(rt&&rt.y)}">Love it</button><button type="button" class="label" data-rate="0" data-date="${date}" aria-pressed="${!!(rt&&!rt.y)}">Not for me</button></div>`; })() : ''}
   <nav class="strip" aria-label="This week">${strip}</nav>
   <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">Try it on in ChatGPT</button></div>`:''}</section>
-  <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>`;
+  <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>
+  ${(()=>{ const sc = o.score || (o.list.length ? lookScore(o.slots, date, {}) : null); if(!sc) return ''; const w = weights();
+    return `<section class="panel"><span class="cap">How it scores</span><p class="caption pad">Six things a stylist weighs. The weights shift as you rate looks.</p><ul class="scores">${FACTORS.map(([k,l])=>`<li><span class="t">${l}<small>${Math.round(w[k]*100)}% of the score</small></span><span class="bar" aria-label="${Math.round(sc.f[k]*100)} out of 100"><i style="width:${Math.round(sc.f[k]*100)}%"></i></span>${sc.note[k]?`<span class="s">${esc(sc.note[k])}</span>`:''}</li>`).join('')}</ul></section>`; })()}`;
 }
 
 function dayRowHTML(d, place){
@@ -1411,6 +1579,8 @@ document.addEventListener('click', async e=>{
   if(t.dataset.close!==undefined){ closeSheet(); return; }
   if(t.dataset.repeat){ toggleRepeat(t.dataset.repeat); return; }
   if(t.dataset.love){ toggleLove(t.dataset.love); return; }
+  if(t.dataset.mode){ S.state.modes[t.dataset.date] = t.dataset.mode; delete S.state.swaps[t.dataset.date]; queuePush({state:true}); render(); toast(MODES[t.dataset.mode]); return; }
+  if(t.dataset.rate!==undefined){ const y = t.dataset.rate==='1'; rateLook(t.dataset.date, y); render(); toast(y ? 'Noted. More like this.' : 'Noted. Less like this.'); return; }
   if(t.dataset.lovewhy){ const id = t.dataset.lovewhy, v = S.style.loves[id] || (S.style.loves[id] = {at:TODAY, why:[]}); const k = t.dataset.why; v.why = (v.why||[]).includes(k) ? v.why.filter(x=>x!==k) : [...(v.why||[]), k]; t.setAttribute('aria-pressed', v.why.includes(k)); queuePush({style:true}); render(); return; }
   if(t.dataset.lookcat){ S.ui.lookCat = t.dataset.lookcat; render(); return; }
   if(t.dataset.lookocc){ S.ui.look.occ = t.dataset.lookocc; render(); return; }
