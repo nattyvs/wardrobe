@@ -252,6 +252,12 @@ button.tag{cursor:pointer}
 .days .rowact{padding:0 0 4px 84px;margin-top:-6px}
 .days .rowact .linkish{display:inline-flex;align-items:center;min-height:44px}
 body.sheet-open .toast{bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px)}
+.extras{padding:22px 0 8px;border-top:1px solid var(--rule-soft);margin-top:18px}
+.extras > .cap{display:block;padding:0 var(--gutter-r) 8px var(--gutter)}
+.extralist{list-style:none;margin:0;padding:0 var(--gutter-r) 0 var(--gutter)}
+.extralist li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--rule-soft)}
+.extralist .linkish{min-height:44px;display:inline-flex;align-items:center}
+.extras .field{margin-top:14px}
 .try-steps{list-style:none;margin:14px var(--gutter-r) 0 var(--gutter);padding:0;display:grid;gap:8px;counter-reset:s}
 .try-steps li{counter-increment:s;display:grid;grid-template-columns:30px minmax(0,1fr);font-size:13.5px;line-height:1.45}
 .try-steps li::before{content:"0" counter(s);font:400 14px/1.4 var(--didot)}
@@ -330,8 +336,8 @@ p.pad{margin:0 0 12px}
 .tripstrip .g{font-size:12.5px;color:var(--pink)}
 .days.trips .dn{font-size:40px}
 .days.trips .t.d{font:400 20px/1.2 var(--didot)}
-.tweather,.packing,.looks{padding-top:22px}
-.tweather > .cap,.packing > .cap,.looks > .cap{display:block;padding:0 var(--gutter-r) 12px var(--gutter)}
+.tweather,.packing,.looks,.triplooks{padding-top:22px}
+.tweather > .cap,.packing > .cap,.looks > .cap,.triplooks > .cap{display:block;padding:0 var(--gutter-r) 12px var(--gutter)}
 .tweather .caption{margin:10px var(--gutter-r) 0 var(--gutter)}
 .tstrip{display:grid;grid-template-columns:repeat(7,1fr);row-gap:14px;margin:0 var(--gutter-r) 0 var(--gutter);border-top:1px solid var(--rule);padding-top:10px;text-align:center}
 .tstrip a{color:inherit;text-decoration:none;display:grid;gap:3px;justify-items:center}

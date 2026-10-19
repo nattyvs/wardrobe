@@ -246,6 +246,8 @@ In the piece sheet, availability is a row of tracked Jost labels inside a charco
 - **Packing list:** rows grouped under Didot section caps, each with a small flat or photo, a Didot name, a stone "Works in 4 of 6 looks" caption and a square checkbox.
 - **Weather row:** a column per day with tracked Jost day label, Didot temperature and a stone date. A temperature taken from past years is marked with a "~" and the caption says so.
 - **Gaps panel:** the one place pink is used for an alert in the trip flow. Pink rule on top, plain sentences underneath ("Rain on Mon 26 and nothing packed will cope"). Hidden when there are no gaps.
+- **What I'm taking:** the primary button on the packing section opens a sheet of the whole closet to tick. Ticked pieces are hers: the suggestion keeps them and builds around them, and their caption starts "You are taking this". A trip is suggested automatically when it is saved.
+- **Also taking:** things not in the closet (swimsuit, a gift) as plain Didot rows with Remove, and one underline input with Add. They are listed only; the app does not dress them.
 - **Forms:** the same underline inputs as Settings. Deleting a trip takes two taps; the first turns the label into "Tap again to delete".
 
 ### Reactions and Rules

@@ -771,6 +771,7 @@ function packTrip(t){
   const needOf = c => c.t!=null ? band(c.t) : 3; // days without weather are planned as mild; the screen says so
   const R = rules(), st = stats();
   const pool = closet().filter(p=>usable(p, true));
+  const mineP = (t.mine||[]).map(piece).filter(Boolean), mineSet = new Set(mineP.map(p=>p.id)); // pieces she chose herself
   const FORMAL = {customer:2.5, office:1.6, off:1};
   const days = ctx.map(c=>({c, need:needOf(c), formal:FORMAL[c.occ]}));
   if(acts.has('evenings')){ for(let i=0;i<Math.max(1,Math.round(D/3));i++){ const c = ctx[Math.min(D-1, i*3+2)]; days.push({c, need:needOf(c), formal:2.4}); } }
@@ -788,9 +789,12 @@ function packTrip(t){
   // Greedy cover: each pick is the piece that does most for the days nothing yet serves well.
   function choose(slot, count, filt, extra, dl){
     dl = dl && dl.length ? dl : days;
-    const list = pool.filter(p=>slotOf(p)===slot && (!filt || filt(p)));
-    const best = dl.map(()=>0), out = [];
-    for(let k=0;k<count && k<list.length;k++){
+    const have = mineP.filter(p=>slotOf(p)===slot && (!filt || filt(p)));
+    const list = pool.filter(p=>slotOf(p)===slot && (!filt || filt(p)) && !have.includes(p));
+    const best = dl.map(()=>0), out = have.slice();
+    have.forEach(h=>dl.forEach((d,i)=>{ best[i] = Math.max(best[i], dayScore(h,slot,d)); }));
+    const target = Math.max(count, have.length);
+    while(out.length < target){
       let top = null, topV = -1e9;
       list.forEach(p=>{
         if(out.includes(p)) return;
@@ -813,7 +817,7 @@ function packTrip(t){
   const minT = known.length ? Math.min(...known.map(c=>c.tmin!=null ? c.tmin : c.t)) : null;
   const eveNeed = minT!=null ? band(minT) : Math.max(...days.map(d=>d.need));
   let outers = [];
-  const keep = new Set();
+  const keep = new Set(mineSet);
   if(eveNeed>=2){
     const outerDays = days.filter(d=>d.need>=2 || d.formal>=2.4);
     const spread = Math.max(...days.map(d=>d.need)) - Math.min(...days.map(d=>d.need));
@@ -833,17 +837,17 @@ function packTrip(t){
   const medianNeed = days.map(d=>d.need).sort((a,b)=>a-b)[Math.floor(days.length/2)];
   bottoms.filter(hasLoops).forEach(b=>{ const x = beltFrom(belts, beltWant(b, medianNeed)); if(x && !beltsIn.includes(x)) beltsIn.push(x); });
   const bag = choose('bag', 1);
-  let ids = [].concat(bottoms, tops, dresses, outers, shoes, scarf, beltsIn, bag).map(p=>p.id);
+  let ids = [...new Set([].concat(bottoms, tops, dresses, outers, shoes, scarf, beltsIn, bag, mineP).map(p=>p.id))];
   // Rest the pieces no look wore, and any bottom worn only once when there are others to share the days.
   for(let pass=0; pass<8; pass++){
     const use = usageCount(planLooks(t, ids));
     let next = ids.filter(id=>(use[id]||0)>0 || keep.has(id));
     if(D>=4){
-      const bs = next.map(piece).filter(p=>p && p.cat==='bottom').sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
+      const bs = next.map(piece).filter(p=>p && p.cat==='bottom' && !mineSet.has(p.id)).sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
       if(bs.length>1 && (use[bs[0].id]||0)<2) next = next.filter(id=>id!==bs[0].id);
     }
     if(D>=6 && next.length===ids.length){
-      const tp = next.map(piece).filter(p=>p && (p.cat==='top' || p.cat==='dress')).sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
+      const tp = next.map(piece).filter(p=>p && (p.cat==='top' || p.cat==='dress') && !mineSet.has(p.id)).sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
       if(tp.length>2 && (use[tp[0].id]||0)<2) next = next.filter(id=>id!==tp[0].id);
     }
     if(next.length===ids.length) break;
@@ -861,6 +865,7 @@ function tripReasons(t){
   const out = {};
   packed.forEach(p=>{
     const k = use[p.id]||0, bits = [];
+    if((t.mine||[]).includes(p.id)) bits.push('You are taking this');
     if(layer && layer.id===p.id) bits.push(`Your layer for the coolest evening, ${minT}°`);
     bits.push(n ? (k ? `works in ${k} of ${n} looks` : 'not in any look yet') : '');
     out[p.id] = cap1(bits.filter(Boolean).join('. ')).replace(/^$/, '');
@@ -1495,9 +1500,13 @@ function viewTrip(id, sub){
   ${gp.gaps.length?`<section class="gaps"><span class="label">Before you fly</span><ul>${gp.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></section>`:''}
   <section class="packing"><span class="cap">In the suitcase${packed.length?` · ${packed.length}`:''}</span>
   <div class="toggles"><label class="toggle"><span>Carry-on only<small>Two pairs of shoes at most, and one warm layer.</small></span><input type="checkbox" class="switch" id="tcarry-live" data-trip="${esc(t.id)}" ${t.carryOn?'checked':''}></label></div>
-  <div class="acts"><button type="button" class="btn${packed.length?' ghost':''}" data-act="suggest" data-id="${esc(t.id)}">${packed.length?'Suggest again':'Suggest a capsule'}</button><button type="button" class="btn ghost" data-act="packadd" data-id="${esc(t.id)}">Add from the closet</button></div>
-  ${packed.length?groups:`<p class="empty pad">Nothing packed yet. Suggest a capsule and tick or untick from there.</p>`}</section>
-  ${packed.length&&D?`<section class="looks"><span class="cap">The looks</span><ul class="days">${lookRows}</ul></section>`:''}
+  <p class="caption pad" style="margin:14px 0 0">Add what you are already taking. Suggest fills in the rest around it, and the looks below show what the suitcase can do.</p>
+  <div class="acts"><button type="button" class="btn" data-act="packadd" data-id="${esc(t.id)}">Add what I'm taking</button><button type="button" class="btn ghost" data-act="suggest" data-id="${esc(t.id)}">${(t.mine||[]).length ? 'Suggest the rest' : packed.length ? 'Suggest again' : 'Suggest a capsule'}</button></div>
+  ${packed.length?groups:`<p class="empty pad">Nothing packed yet. Add what you are taking, or tap Suggest a capsule.</p>`}</section>
+  <section class="extras"><span class="cap">Also taking</span>
+    ${(t.extras||[]).length?`<ul class="picklist extralist">${t.extras.map(x=>`<li><span class="nm">${esc(x.name)}</span><button type="button" class="linkish" data-act="rmextra" data-id="${esc(t.id)}" data-x="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">Remove</button></li>`).join('')}</ul>`:''}
+    <div class="field"><label class="cap" for="extrain">Not in the closet</label><div class="inrow"><input id="extrain" data-trip="${esc(t.id)}" placeholder="Swimsuit, sandals, a gift" autocomplete="off" enterkeyhint="done"><button type="button" class="linkish" data-act="addextra" data-id="${esc(t.id)}">Add</button></div></div></section>
+  ${packed.length&&D?`<section class="triplooks"><span class="cap">The looks</span><ul class="days">${lookRows}</ul></section>`:''}
   <div class="acts"><a class="btn ghost" href="#trips">All trips</a></div>`;
 }
 
@@ -1565,7 +1574,7 @@ function sheetPackAdd(tid){
   const t = tripById(tid); if(!t) return;
   const have = new Set(t.packed||[]);
   const groups = PACK_CATS.map(([c,l])=>{ const xs = closet().filter(p=>p.cat===c && usable(p, true)); return xs.length ? `<section class="group"><h2 class="sec">${l}</h2><ul class="picklist packlist">${xs.map(p=>`<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(p.colour||'')}</span></span><input type="checkbox" class="check" data-pack="${esc(p.id)}" data-trip="${esc(tid)}" ${have.has(p.id)?'checked':''} aria-label="${esc(p.name)}"></label></li>`).join('')}</ul></section>` : ''; }).join('');
-  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Add from the closet</span><button type="button" class="linkish" data-close>Done</button></div>${groups}`);
+  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">What I'm taking</span><button type="button" class="linkish" data-close>Done</button></div><p class="caption pad" style="margin:12px 0 0">Tick everything you are already taking. Suggest the rest fills in around it.</p>${groups}`);
 }
 
 /* ---------------- try on: a prompt and a flat-lay image to carry to ChatGPT by hand ----------------
@@ -1672,10 +1681,18 @@ function toggleReaction(date, id, tag, on){
   const made = rules().list.length; if(on && made !== toggleReaction.made){ toggleReaction.made = made; toast('That is now a rule'); }
 }
 toggleReaction.made = 0;
+function addExtra(tid){
+  const tr = tripById(tid), el = $('#extrain'); if(!tr || !el) return;
+  const name = el.value.trim(); if(!name){ toast('Type what you are taking'); return; }
+  tr.extras = [...(tr.extras||[]), {id:'x-'+Date.now().toString(36), name}]; tr.updated = Date.now();
+  queuePush({trips:true}); render(); toast('Added');
+  const again = $('#extrain'); if(again) again.focus();
+}
 function togglePack(tid, id, on){
   const t = tripById(tid); if(!t) return;
-  const set = new Set(t.packed||[]); on ? set.add(id) : set.delete(id);
-  t.packed = [...set]; t.updated = Date.now();
+  const set = new Set(t.packed||[]), mine = new Set(t.mine||[]);
+  if(on){ set.add(id); mine.add(id); } else { set.delete(id); mine.delete(id); }
+  t.packed = [...set]; t.mine = [...mine]; t.updated = Date.now();
   queuePush({trips:true}); render();
 }
 const twBusy = {};
@@ -1697,7 +1714,11 @@ async function saveTrip(){
   queuePush({trips:true});
   S.ui.draft = null; S.ui.draftKey = null;
   location.hash = '#trip/'+t.id;
-  loadTripWeather(t, true).then(()=>{ if(route().name==='trip' && !isTripForm(route())) render(); }).catch(()=>{});
+  loadTripWeather(t, true).catch(()=>{}).then(()=>{
+    const tr = tripById(t.id);
+    if(tr && !(tr.packed||[]).length){ tr.packed = packTrip(tr); tr.updated = Date.now(); queuePush({trips:true}); if(tr.packed.length) toast(`${tr.packed.length} pieces suggested`); }
+    if(route().name==='trip' && !isTripForm(route())) render();
+  });
 }
 
 /* ---------------- events ---------------- */
@@ -1813,6 +1834,8 @@ document.addEventListener('click', async e=>{
     queuePush({trips:true}); render(); toast(tr.packed.length ? `${tr.packed.length} pieces packed` : 'Nothing to pack from yet');
   }
   else if(act==='packadd'){ sheetPackAdd(t.dataset.id); }
+  else if(act==='addextra'){ addExtra(t.dataset.id); }
+  else if(act==='rmextra'){ const tr = tripById(t.dataset.id); if(tr){ tr.extras = (tr.extras||[]).filter(x=>x.id!==t.dataset.x); tr.updated = Date.now(); queuePush({trips:true}); render(); } }
   else if(act==='addstop'){ const d = S.ui.draft, last = d.stops[d.stops.length-1]; d.stops.push({place:'', from:last&&last.to||'', to:'', lat:null, lon:null}); render(); }
   else if(act==='rmstop'){ S.ui.draft.stops.splice(+t.dataset.i, 1); render(); }
   else if(act==='findplace'){
@@ -1883,7 +1906,7 @@ document.addEventListener('change', async e=>{
   }
 });
 $('#scrim').addEventListener('click', closeSheet);
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); if(e.key==='Enter' && e.target.id==='extrain'){ e.preventDefault(); addExtra(e.target.dataset.trip); } });
 function currentPicks(){ return [...document.querySelectorAll('[data-pick]')].filter(x=>x.checked).map(x=>x.dataset.pick); }
 function restorePicks(){ const keep = S.ui.keepPicks; if(!keep) return; document.querySelectorAll('[data-pick]').forEach(x=>x.checked = keep.includes(x.dataset.pick)); S.ui.keepPicks = null; }
 function upsertLog(date, patch){
