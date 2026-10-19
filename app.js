@@ -1127,7 +1127,7 @@ function viewDay(date, settle){
   const tripLine = trip ? `<p class="triptag"><a href="#trip/${esc(trip.id)}"><span class="label">${esc(place || 'On a trip')}</span></a> <span class="caption">Day ${daysBetween(tripSpan(trip).from, date)+1} of ${tripDays(trip).length}${o.scope ? ', dressed from the suitcase' : ', nothing packed yet'}</span></p>` : '';
   const fnote = faceNote(o);
   const pics = o.list.length ? lookPictures(o.list.map(x=>x.p.id)) : [];
-  const picSlides = pics.map((lp,i)=>`<figure class="heropic" id="heropic-${i}" aria-label="${lp.real?'Your photo of this look':'ChatGPT try-on of this look'}"><span class="label">${lp.real?'Worn':'Try-on'} · ${esc(lp.real ? nice(lp.date) : verdictWords(lp.tr))}</span><img src="${lp.src}" alt="${lp.real?'You wearing this look':'ChatGPT try-on of this look'}">${lp.real?'':'<figcaption class="caption">AI changes details. Judge the shape and colours.</figcaption>'}</figure>`).join('');
+  const picSlides = pics.map((lp,i)=>`<figure class="heropic" id="heropic-${i}" aria-label="${lp.real?'Your photo of this look':'ChatGPT try-on of this look'}"><button type="button" class="linkish rmpic" data-act="rmpic" data-kind="${lp.real?'worn':'tryon'}" data-id="${esc(lp.real ? lp.date : lp.tr.id)}">Remove</button><span class="label">${lp.real?'Worn':'Try-on'} · ${esc(lp.real ? nice(lp.date) : verdictWords(lp.tr))}</span><img src="${lp.src}" alt="${lp.real?'You wearing this look':'ChatGPT try-on of this look'}">${lp.real?'':'<figcaption class="caption">AI changes details. Judge the shape and colours.</figcaption>'}</figure>`).join('');
   const dots = pics.length ? `<div class="herodots" aria-hidden="true">${['',...pics].map((_,i)=>`<i${i===0?' class="on"':''}></i>`).join('')}</div>` : '';
   return `${masthead(isToday ? null : {href:'#week', label:'Week'})}
   <div class="herow" data-swipe="${pics.length}">
@@ -1379,7 +1379,7 @@ function viewLog(arg){
     <div class="field"><span class="cap">How did it feel?</span></div>
     <div class="feel" role="group" aria-label="How did it feel">${Object.entries(FEEL).map(([k,l])=>`<button type="button" data-feel="${k}" aria-pressed="${feel===k}">${l}</button>`).join('')}</div>
     <div class="field"><label class="cap" for="lognote">A note for next time</label><textarea id="lognote" rows="2" placeholder="Too warm by lunch. Scarf worked.">${esc(entry&&entry.note||'')}</textarea></div>
-    <div class="field"><span class="cap">Mirror photo</span><div class="photo-in">${entry&&entry.photoPreview?`<img src="${entry.photoPreview}" alt="Mirror photo">`:''}<label class="linkish" for="photo">${entry&&entry.photoPreview?'Replace photo':'Add a photo'}</label><input type="file" id="photo" accept="image/*" class="sr"></div><span class="hint">${!(entry&&entry.photoPreview) && tryonFor([...sel]) ? 'You tried this look on in ChatGPT. Add a photo of the real thing and it takes the render’s place.' : 'Optional. Claude can match it to your pieces.'}</span></div>
+    <div class="field"><span class="cap">Mirror photo</span><div class="photo-in">${entry&&entry.photoPreview?`<img src="${entry.photoPreview}" alt="Mirror photo">`:''}<label class="linkish" for="photo">${entry&&entry.photoPreview?'Replace photo':'Add a photo'}</label>${(entry&&entry.photoPreview)||S.ui.photo?`<button type="button" class="linkish" data-act="rmlogphoto" data-date="${date}">Remove photo</button>`:''}<input type="file" id="photo" accept="image/*" class="sr"></div><span class="hint">${!(entry&&entry.photoPreview) && tryonFor([...sel]) ? 'You tried this look on in ChatGPT. Add a photo of the real thing and it takes the render’s place.' : 'Optional. Claude can match it to your pieces.'}</span></div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savelog" data-date="${date}">Save the log</button></div>
   </div>
   ${entry?`<section class="panel"><span class="cap">How did it go?</span><p class="caption pad">React to the look or to a single piece. Two of the same reaction become a rule the app follows.</p><div id="reactions">${reactionsHTML(date)}</div></section>`:''}
@@ -1991,7 +1991,7 @@ function tryResultBlock(){
   return `<div class="try-res"><img src="${tr.res.preview}" alt="ChatGPT's try-on"></div>
     <div class="rate" role="group" aria-label="Your verdict"><span class="label">This look</span><button type="button" class="label" data-tryv="1" aria-pressed="${tr.verdict===true}">Love it</button><button type="button" class="label" data-tryv="0" aria-pressed="${tr.verdict===false}">Not for me</button></div>
     ${tr.verdict===false ? `<div class="field"><span class="cap">What's off?</span></div>${tagChips(OFF_TAGS, tr.off||[], 'data-tryoff')}` : ''}
-    <div class="acts"><button type="button" class="btn" data-act="tryonsave">Save</button><label class="linkish" for="tryresult">Pick another</label><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
+    <div class="acts"><button type="button" class="btn" data-act="tryonsave">Save</button><label class="linkish" for="tryresult">Pick another</label><button type="button" class="linkish" data-act="tryclear">Remove</button><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
 }
 const refreshTry = () => { const el = $('#tryres'); if(el) el.innerHTML = tryResultBlock(); };
 async function saveTryon(){
@@ -2004,6 +2004,29 @@ async function saveTryon(){
   if(tr.sc){ S.style.ratings = (S.style.ratings||[]).concat([{date, items:tr.items, y:tr.verdict, mode:'tryon', src:'tryon', ref:id, f:tr.sc.f, at:Date.now()}]); learnFrom(tr.sc, tr.verdict, 0.04); }
   if(tr.verdict) pinLook(date, tr.items);
   queuePush({style:true}); closeSheet(); render(); toast(tr.verdict ? 'Saved. More like this.' : 'Saved. Claude will look at it on Sunday.');
+}
+
+// Taking a picture out: hidden in the app at once, and the file is deleted from the private repo too.
+async function ghDelete(path){
+  try{
+    const r = await fetch(ghURL(path), {cache:'no-store', headers:ghHeaders()}); if(!r.ok) return;
+    const j = await r.json();
+    await fetch(ghURL(path), {method:'DELETE', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify({message:'Remove a photo', sha:j.sha})});
+  }catch(e){}
+}
+function removeTryon(id){
+  const x = (S.style.tryons||[]).find(y=>y.id===id); if(!x) return;
+  const path = x.photo; x.deleted = true; x.updated = Date.now(); delete x.preview; delete x.photo;
+  S.style.ratings = (S.style.ratings||[]).filter(r=>r.ref!==id);
+  if(path){ delete S.photos[path]; if(ghReady()) ghDelete(path); }
+  queuePush({style:true});
+}
+function removeWornPhoto(date){
+  const e = log().find(x=>x.date===date && x.source!=='sample'); if(!e) return;
+  const path = e.photo; upsertLog(date, {photo:null, photoPreview:null});
+  (S.style.tryons||[]).forEach(t=>{ if(t.wornOn===date){ delete t.wornOn; t.updated = Date.now(); } });
+  if(path){ delete S.photos[path]; if(ghReady()) ghDelete(path); }
+  queuePush({log:true, style:true});
 }
 
 /* ---------------- actions ---------------- */
@@ -2116,6 +2139,21 @@ document.addEventListener('click', async e=>{
     sheetTryOn(t.dataset.date); return;
   }
   if(act==='tryonsave'){ await saveTryon(); return; }
+  if(act==='tryclear'){ if(S.ui.try){ S.ui.try.res = null; S.ui.try.verdict = null; S.ui.try.off = []; refreshTry(); } return; }
+  if(act==='rmpic'){
+    const key = 'pic/'+t.dataset.kind+'/'+t.dataset.id;
+    if(S.ui.confirmRm!==key){ S.ui.confirmRm = key; t.textContent = 'Tap again to remove'; return; }
+    S.ui.confirmRm = null;
+    if(t.dataset.kind==='tryon') removeTryon(t.dataset.id); else removeWornPhoto(t.dataset.id);
+    render(); toast('Photo removed'); return;
+  }
+  if(act==='rmlogphoto'){
+    const d = t.dataset.date;
+    if(S.ui.photo){ S.ui.photo = null; render(); toast('Photo removed'); return; }
+    const key = 'pic/worn/'+d;
+    if(S.ui.confirmRm!==key){ S.ui.confirmRm = key; t.textContent = 'Tap again to remove'; return; }
+    S.ui.confirmRm = null; removeWornPhoto(d); render(); toast('Photo removed'); return;
+  }
   if(act==='markdormant'){ sheetDormant(); return; }
   if(act==='backpiece'){ sheetPiece(t.dataset.id); return; }
   if(act==='lookswith' || act==='withmore'){ t.textContent = 'Putting looks together…'; t.disabled = true; const id = t.dataset.id, r = act==='withmore' ? +t.dataset.round : 0; setTimeout(()=>sheetWith(id, r), 30); return; }
