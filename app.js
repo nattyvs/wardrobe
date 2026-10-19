@@ -1081,7 +1081,7 @@ function dayRowHTML(d, place){
   const o = outfitFor(d), w = wx(d), oc = occasionFor(d);
   const thumbs = o.list.map(({p})=>`<span>${art(p)}</span>`).join('');
   const names = o.list.map(({p})=>p.name).join(', ');
-  return `<li class="${d===TODAY?'today':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':oc.occ==='off'?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${o.list.length?`<div class="rowact"><button type="button" class="linkish" data-act="tryon" data-date="${d}">Try on in ChatGPT</button></div>`:''}</li>`;
+  return `<li class="${d===TODAY?'today':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':oc.occ==='off'?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${o.list.length?`<div class="rowact"><button type="button" class="linkish" data-act="tryon" data-date="${d}" aria-label="Try on ${esc(dayName(d))}'s look in ChatGPT">Try on</button></div>`:''}</li>`;
 }
 function tripStripHTML(){
   const t = upcomingTrips()[0]; if(!t) return '';
@@ -1113,14 +1113,15 @@ function weekInspo(startDay){
 }
 function inspoRowsHTML(startDay){
   return weekInspo(startDay).map((o,i)=>{ const w = wx(o.forDay);
-    return `<li class="olook"><span class="dn">${pad(i+1)}</span><span class="meta"><span class="top"><span class="tag">Office look</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${o.list.map(({p})=>`<span>${art(p)}</span>`).join('')}</span><span class="names">${esc(o.list.map(({p})=>p.name).join(', '))}. Made for ${esc(dayName(o.forDay))}'s weather. Tap a day above to put it on a day.</span></span><div class="rowact"><button type="button" class="linkish" data-act="tryon" data-inspo="${esc(startDay)}|${i}">Try on in ChatGPT</button></div></li>`; }).join('');
+    return `<li class="olook"><span class="dn">${pad(i+1)}</span><span class="meta"><span class="top"><span class="label">${w?`Dressed for ${w.feel}°`:'Office look'}</span></span><span class="thumbs">${o.list.map(({p})=>`<span>${art(p)}</span>`).join('')}</span><span class="names">${esc(o.list.map(({p})=>p.name).join(', '))}. Built for ${esc(dayName(o.forDay))}'s weather.</span></span><div class="rowact"><button type="button" class="linkish" data-act="tryon" data-inspo="${esc(startDay)}|${i}" aria-label="Try on in ChatGPT">Try on</button></div></li>`; }).join('');
 }
-function officePicker(startDay, title){
-  const days = weekOf(startDay).slice(0,5);
-  const isIn = isInOffice;
-  const n = days.filter(isIn).length;
-  return `<section class="office"><div class="officehead"><span class="cap">${esc(title)}</span><span class="caption">${n ? `${n} day${n>1?'s':''} in` : 'None picked'}</span></div>
-    <div class="segs" role="group" aria-label="${esc(title)}">${days.map(d=>`<button type="button" class="label" data-office="${d}" aria-pressed="${isIn(d)}" aria-label="${dayName(d)} ${nice(d)}">${dayShort(d)} ${parse(d).getDate()}</button>`).join('')}</div></section>`;
+function officePicker(){
+  const next = S.ui.officeWeek==='next', start = next ? addDays(monday(TODAY),7) : TODAY;
+  const days = weekOf(start).slice(0,5), n = days.filter(isInOffice).length;
+  const tab = (k,l) => `<button type="button" class="label" data-officeweek="${k}" aria-pressed="${(k==='next')===next}">${l}</button>`;
+  return `<section class="office"><div class="officehead"><span class="cap">Office days</span><span class="weektabs" role="group" aria-label="Which week">${tab('this','This week')}${tab('next','Next week')}</span></div>
+    <div class="chips" role="group" aria-label="Office days ${next?'next':'this'} week">${days.map(d=>`<button type="button" class="label" data-office="${d}" aria-pressed="${isInOffice(d)}" aria-label="${dayName(d)} ${nice(d)}">${dayShort(d)} ${parse(d).getDate()}</button>`).join('')}</div>
+    <p class="caption pad officenote">${n ? `${n} day${n>1?'s':''} in the office. Tap a day to add or remove it.` : 'Every day starts as a day off. Tap the days you go in.'}</p></section>`;
 }
 function viewWeek(){
   const days = weekOf(TODAY);
@@ -1129,10 +1130,10 @@ function viewWeek(){
   return `${masthead()}
   <header class="pagehead"><h1 class="page">This week</h1><p class="cap">Week ${isoWeek(TODAY)} · ${esc(nice(days[0]))} to ${esc(nice(days[6]))}</p></header>
   ${tripStripHTML()}
-  <div class="officepick">${officePicker(TODAY, 'Office days this week')}${officePicker(addDays(monday(TODAY),7), 'Office days next week')}<p class="caption pad" style="margin:4px 0 0">Every day starts as a day off. Tap the days you go in, and add an extra one any week by tapping it. Until you do, the week carries ${OFFICE_PER_WEEK} office looks to keep in mind. Tap a day's label on its page for a customer day.</p></div>
+  <div class="officepick">${officePicker()}</div>
   ${note?`<div class="plan-note"><span class="label">From Claude</span>${esc(note)}</div>`:''}
   <hr class="rule">
-  ${inspoRowsHTML(TODAY) ? `<section class="officelooks"><span class="cap pad" style="display:block">Office looks to keep in mind</span><ul class="days">${inspoRowsHTML(TODAY)}</ul></section>` : ''}
+  ${inspoRowsHTML(TODAY) ? `<section class="officelooks"><span class="cap pad">Office looks to keep in mind</span><ul class="days">${inspoRowsHTML(TODAY)}</ul></section>` : ''}
   <ul class="days">${rows}</ul>
   <div class="acts"><a class="btn ghost" href="#trips">${upcomingTrips().length?'Trips':'Plan a trip'}</a></div>`;
 }
@@ -1402,8 +1403,8 @@ function viewTrip(id, sub){
 }
 
 /* ---------------- sheets ---------------- */
-function openSheet(html){ const s=$('#sheet'); s.innerHTML=html; s.classList.add('open'); $('#scrim').classList.add('open'); setTimeout(()=>{ const f=s.querySelector('[data-close]'); f&&f.focus(); }, 50); }
-function closeSheet(){ $('#sheet').classList.remove('open'); $('#scrim').classList.remove('open'); }
+function openSheet(html){ document.body.classList.add('sheet-open'); const s=$('#sheet'); s.innerHTML=html; s.classList.add('open'); $('#scrim').classList.add('open'); setTimeout(()=>{ const f=s.querySelector('[data-close]'); f&&f.focus(); }, 50); }
+function closeSheet(){ document.body.classList.remove('sheet-open'); $('#sheet').classList.remove('open'); $('#scrim').classList.remove('open'); }
 function ruleLine(r, id){
   if(r.kind==='pair'){ const other = piece(r.a===id ? r.b : r.a); return `Not paired with the ${other ? other.name.toLowerCase() : 'other piece'} after ${r.n} "Colours looked dead" reports.`; }
   return ruleText(r);
@@ -1613,6 +1614,7 @@ document.addEventListener('click', async e=>{
   if(t.dataset.lookocc){ S.ui.look.occ = t.dataset.lookocc; render(); return; }
   if(t.dataset.looktag){ const d = S.ui.look, k = t.dataset.looktag; d.tags = d.tags.includes(k) ? d.tags.filter(x=>x!==k) : [...d.tags, k]; t.setAttribute('aria-pressed', d.tags.includes(k)); return; }
   if(t.dataset.inspotag){ const d = S.ui.inspo, k = t.dataset.inspotag; d.tags = d.tags.includes(k) ? d.tags.filter(x=>x!==k) : [...d.tags, k]; t.setAttribute('aria-pressed', d.tags.includes(k)); return; }
+  if(t.dataset.officeweek){ S.ui.officeWeek = t.dataset.officeweek; render(); return; }
   if(t.dataset.office){
     const d = t.dataset.office, k = occasionFor(d).occ, inOffice = k==='office' || k==='customer';
     S.state.dayOcc[d] = {occ: inOffice ? 'off' : 'office', note:''};

@@ -238,13 +238,20 @@ button.tag{cursor:pointer}
 .sheet .big img{height:100%;object-fit:contain}
 .office{padding:0 0 4px}
 .officehead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:16px var(--gutter-r) 0 var(--gutter)}
-.office .segs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;padding-top:10px;padding-bottom:4px;overflow:visible}
-.office .segs button{padding:10px 0;border:1px solid var(--rule-soft);min-height:44px;color:var(--ink-2);text-align:center;letter-spacing:.1em;white-space:nowrap}
-.office .segs button[aria-pressed="true"]{border:1px solid var(--ink);background:var(--ink);color:var(--paper)}
+.weektabs{display:flex;gap:16px}
+.weektabs button{background:none;border:0;padding:8px 0 4px;min-height:36px;color:var(--ink-2)}
+.weektabs button[aria-pressed="true"]{color:var(--ink);border-bottom:1px solid var(--ink)}
+.chips{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;padding:8px var(--gutter-r) 0 var(--gutter)}
+.chips button{padding:10px 0;border:1px solid var(--ink-2);background:transparent;min-height:44px;color:var(--ink);text-align:center;letter-spacing:.1em;white-space:nowrap}
+.chips button[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.officenote{margin:14px 0 0}
+.officelooks{margin-top:22px}
+.officelooks > .cap{display:block}
 .days .olook{display:grid;grid-template-columns:72px 1fr;gap:4px 12px;padding:14px 0 0}
 .days .olook .rowact{grid-column:1/-1;padding-left:84px}
-.officelooks{margin-top:22px}
-.days .rowact{padding:0 0 14px 84px;margin-top:-4px}
+.days .rowact{padding:0 0 4px 84px;margin-top:-6px}
+.days .rowact .linkish{display:inline-flex;align-items:center;min-height:44px}
+body.sheet-open .toast{bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px)}
 .try-steps{list-style:none;margin:14px var(--gutter-r) 0 var(--gutter);padding:0;display:grid;gap:8px;counter-reset:s}
 .try-steps li{counter-increment:s;display:grid;grid-template-columns:30px minmax(0,1fr);font-size:13.5px;line-height:1.45}
 .try-steps li::before{content:"0" counter(s);font:400 14px/1.4 var(--didot)}
