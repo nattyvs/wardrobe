@@ -40,8 +40,9 @@ const monday = s => { const d = parse(s); const k = (d.getDay()+6)%7; d.setDate(
 const weekOf = s => { const m = monday(s); return Array.from({length:7}, (_,i)=>addDays(m,i)); };
 const isoWeek = s => { const d = parse(s); d.setDate(d.getDate()+3-((d.getDay()+6)%7)); const w1 = new Date(d.getFullYear(),0,4); return 1+Math.round(((d-w1)/864e5-3+((w1.getDay()+6)%7))/7); };
 const daysBetween = (a,b) => Math.round((parse(b)-parse(a))/864e5);
+function hasHistory(){ return (S.log||[]).some(e=>e.source!=='sample') || settings.sample; }
 function sinceWords(s){
-  if(!s) return 'Never worn';
+  if(!s) return hasHistory() ? 'Never worn' : 'No wears logged yet';
   const n = daysBetween(s, TODAY);
   if(n<=0) return 'Worn today';
   if(n===1) return 'Worn yesterday';
@@ -129,7 +130,7 @@ function forecastLine(w){
 
 /* ---------------- fabric ---------------- */
 function fabricOf(p){
-  const c = (p.composition||'').toLowerCase(), sh = p.shape;
+  const c = ((p.composition||'')+' '+(p.name||'')).toLowerCase(), sh = p.shape;
   if(/suede/.test(c)) return {name:'Suede', tex:'grain', note:'Soft nap. Keep it out of the rain.'};
   if(/leather/.test(c)) return {name:'Leather', tex:'grain', note:'Structured and hard-wearing.'};
   if(/mohair/.test(c)) return {name:'Mohair knit', tex:'ribs', note:'Light for its warmth, with a soft halo.'};
@@ -149,7 +150,12 @@ function fabricOf(p){
   if(/wool/.test(c)) return {name:'Wool twill', tex:'twill', note:'Holds its shape and a crease.'};
   if(/viscose|polyester|acrylic|polyamide/.test(c)) return {name:'Crepe', tex:'sheen', note:'Drapes well, little warmth.'};
   if(/cotton/.test(c)) return sh==='tee' ? {name:'Cotton jersey', tex:'fine', note:'Soft and light. A base layer.'} : {name:'Cotton', tex:'weave', note:'Breathable everyday cloth.'};
-  return {name: p.composition ? cap1(p.composition) : 'Fabric to add', tex:'fine', note: p.composition ? '' : 'Add the composition from the label.'};
+  if(/tweed/.test(c)) return {name:'Tweed', tex:'felt', note:'Dense and warm, with texture.'};
+  if(/jersey/.test(c)) return {name:'Jersey', tex:'fine', note:'Soft, easy and forgiving.'};
+  if(/satin/.test(c)) return {name:'Satin', tex:'sheen', note:'Smooth with a soft shine.'};
+  if(/puffer|down|quilted/.test(c)) return {name:'Padded', tex:'fine', note:'Warm and light. Casual by nature.'};
+  if(/broderie/.test(c)) return {name:'Cotton broderie', tex:'weave', note:'Light, with cut-work detail.'};
+  return {name: p.composition ? cap1(p.composition) : '', tex:'fine', note: p.composition ? '' : 'Composition not added yet.'};
 }
 /* ---------------- drawing a piece ---------------- */
 function art(p){
@@ -196,7 +202,7 @@ function buildOutfit(date){
   };
   // The hero: the most neglected piece that suits today.
   const suitable = pool.filter(p=>p.cat!=='outer' || need>=2).map(p=>({p, s: score(p, p.cat==='outer'?'outer':p.cat) + (recentDays(p.id)===999?1:Math.min(recentDays(p.id),120)/30)})).sort((a,b)=>b.s-a.s);
-  const hero = suitable[0] && recentDays(suitable[0].p.id) >= 45 ? suitable[0].p : null;
+  const hero = hasHistory() && suitable[0] && recentDays(suitable[0].p.id) >= 45 ? suitable[0].p : null;
   const chosen = hero ? [hero] : [];
   const slots = {};
   if(hero) slots[hero.cat==='dress'?'dress':hero.cat] = hero;
@@ -255,9 +261,10 @@ function outfitFor(date){
 function whyLine(o, date){
   if(o.why) return o.why;
   const st = stats(date), bits = [];
-  if(o.hero){ const l = st[o.hero.id] && st[o.hero.id].last; bits.push(l ? `The ${o.hero.name.toLowerCase()} hasn't been out since ${MONTHS[parse(l).getMonth()]}.` : `The ${o.hero.name.toLowerCase()} gets its first outing.`); }
+  if(o.hero && hasHistory()){ const l = st[o.hero.id] && st[o.hero.id].last; bits.push(l ? `The ${o.hero.name.toLowerCase()} hasn't been out since ${MONTHS[parse(l).getMonth()]}.` : `The ${o.hero.name.toLowerCase()} gets its first outing.`); }
   const warm = o.slots.outer || o.slots.top;
-  if(warm && o.need>=3) bits.push(`${fabricOf(warm).name} for ${Math.round(o.temp)}°.`);
+  if(warm && o.need>=3 && fabricOf(warm).name) bits.push(`${fabricOf(warm).name} for ${Math.round(o.temp)}°.`);
+  else if(warm && o.need>=3) bits.push(`The ${warm.name.toLowerCase()} for ${Math.round(o.temp)}°.`);
   else if(o.need<=2) bits.push(`Light layers for ${Math.round(o.temp)}°.`);
   if(o.occ==='customer') bits.push(o.slots.shoes && o.slots.shoes.formality>=2 ? 'Sharper shoes for the meeting.' : 'Dressed up a notch for the meeting.');
   return bits.join(' ');
@@ -376,7 +383,7 @@ function viewDay(date, settle){
   o.list.forEach(({p})=>{ const f = fabricOf(p); const k = (p.colour||'')+'|'+f.name; if(cseen[k]) return; cseen[k]=1;
     const sw = p.swatch && S.photos[p.swatch] ? `background-image:url(${S.photos[p.swatch]})` : `background-color:${esc(p.hex||'#999')}`;
     if(p.swatch && !S.photos[p.swatch] && ghReady()) loadPhoto(p.swatch);
-    cf.push(`<li><i style="${sw}" role="img" aria-label="${esc((p.colour||'')+' '+f.name)}"></i><span><span class="t">${esc(p.colour||'')} · ${esc(f.name)}</span><span class="s">${esc(f.note)}</span></span></li>`); });
+    cf.push(`<li><i style="${sw}" role="img" aria-label="${esc((p.colour||'')+' '+f.name)}"></i><span><span class="t">${esc(p.colour||'')}${f.name?` · ${esc(f.name)}`:''}</span><span class="s">${esc(f.note)}</span></span></li>`); });
   const strip = weekOf(date).map(d=>{ const ww = wx(d), oc = occasionFor(d).occ; return `<a href="#day/${d}" class="${d===date?'on':''}" aria-label="${dayName(d)} ${nice(d)}"><span class="label">${dayShort(d)}</span><b>${ww?ww.feel+'°':'·'}</b><i class="${oc==='customer'?'':'no'}"></i></a>`; }).join('');
   const tagCls = occ.occ==='customer' ? 'customer' : occ.occ==='off' ? 'off' : '';
   const actions = isToday
@@ -391,7 +398,7 @@ function viewDay(date, settle){
   </section>
   <div class="credits">
     <div class="occ"><button type="button" class="tag ${tagCls}" data-act="occ" data-date="${date}" aria-label="Occasion: ${OCC[occ.occ]}. Tap to change.">${OCC[occ.occ]}</button>${occ.note?`<span class="label">${esc(occ.note)}</span>`:''}</div>
-    <p class="credit-line">${o.list.map(({p},i)=>`<span><b>${pad(i+1)}</b> <button type="button" data-piece="${esc(p.id)}">${esc(p.name)}</button>, ${esc(fabricOf(p).name.toLowerCase())}</span>`).join(' ')}</p>
+    <p class="credit-line">${o.list.map(({p},i)=>`<span><b>${pad(i+1)}</b> <button type="button" data-piece="${esc(p.id)}">${esc(p.name)}</button>${fabricOf(p).name?`, ${esc(fabricOf(p).name.toLowerCase())}`:''}</span>`).join(' ')}</p>
     <p class="why">${esc(whyLine(o, date))}</p>
     ${o.adjusted?`<p class="adjusted">${esc(o.adjusted)}</p>`:''}
   </div>
@@ -435,9 +442,9 @@ function viewCloset(filter){
   const share = top ? top[1]/all.length : 0;
   const frac = share>=.45?'nearly half' : share>=.3?'a third' : share>=.22?'a quarter' : share>=.15?'a fifth' : null;
   const rareN = counts.rare + counts.never;
-  const lede = `${all.length} pieces.${top&&frac?` ${cap1(top[0])} does ${frac} of the work.`:''}${rareN?` <em>${rareN} haven't been worn in two months.</em>`:''}`;
-  const item = p => { const s = st[p.id]; const fresh = !p.dontWear && (!s.last || daysBetween(s.last, TODAY)>=60);
-    const line = p.dontWear ? 'Set aside' : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : 'Never worn';
+  const lede = `${all.length} pieces.${top&&frac?` ${cap1(top[0])} does ${frac} of the work.`:''}${!hasHistory() ? ' Your wear history starts with the first log.' : rareN?` <em>${rareN} haven't been worn in two months.</em>`:''}`;
+  const item = p => { const s = st[p.id]; const fresh = hasHistory() && !p.dontWear && (!s.last || daysBetween(s.last, TODAY)>=60);
+    const line = p.dontWear ? 'Set aside' : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : sinceWords(null);
     return `<button type="button" class="item${p.dontWear?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span><span class="st${fresh?' fresh':''}">${esc(line)}</span></button>`; };
   let body = '';
   const list = all.filter(F[filter].f);
@@ -508,7 +515,7 @@ function sheetPiece(id){
     <div class="big">${art(p)}</div>
     <h2 class="sec">${esc(p.name)}</h2>
     <dl class="facts">
-      <dt>Worn</dt><dd>${s.count?`${s.count} time${s.count>1?'s':''} · ${esc(sinceWords(s.last).toLowerCase())}`:'Never'}</dd>
+      <dt>Worn</dt><dd>${s.count?`${s.count} time${s.count>1?'s':''} · ${esc(sinceWords(s.last).toLowerCase())}`:esc(sinceWords(null))}</dd>
       <dt>Fabric</dt><dd>${esc(f.name)}${f.note?`. ${esc(f.note)}`:''}</dd>
       <dt>Warmth</dt><dd>${warmW}</dd>
     </dl>
