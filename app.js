@@ -1731,8 +1731,12 @@ function shapeFields(p){
   return shapeGroups(p).map(k=>{ const G = SHAPE[k], opts = k==='length' ? (skirtish(p) ? LEN_DRESS : LEN_TOP) : G.o, v = p[k];
     return `<div class="field"><span class="cap">${G.l}${!p.shapeChecked && (G.multi ? (v||[]).length : v) ? ' <em class="guess">a guess</em>' : ''}</span></div><div class="segs wrap" role="group" aria-label="${G.l}">${opts.map(([val,lab])=>`<button type="button" class="label" data-shape="${k}" data-v="${val}" aria-pressed="${G.multi ? (v||[]).includes(val) : v===val}">${lab}</button>`).join('')}</div>`; }).join('');
 }
-function sheetPiece(id){
+const PIECE_TABS = [['wear','Wear'],['details','Details'],['rules','Rules']];
+function sheetPiece(id, tab){
   const p = piece(id); if(!p) return;
+  tab = tab || 'wear';
+  const hid = k => k===tab ? '' : ' hidden';
+  const tabsHTML = PIECE_TABS.map(([k,l])=>`<button type="button" class="label" role="tab" data-ptab="${k}" aria-pressed="${k===tab}">${l}</button>`).join('');
   const s = stats()[id], f = fabricOf(p), rep = onRepeatSince(id), sx = statusOf(p);
   const warmW = ['','Light','Mid-weight','Warm','Very warm','Heaviest'][warmthOf(p)];
   const mine = rules().list.filter(r=>r.id===id || r.a===id || r.b===id);
@@ -1741,6 +1745,8 @@ function sheetPiece(id){
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">${esc(p.cat==='accessory'?'Accessory':cap1(p.cat==='outer'?'Outerwear':p.cat))}</span><button type="button" class="linkish" data-close>Close</button></div>
     <div class="big">${art(p)}</div>
     <h2 class="sec">${esc(p.name)}</h2>
+    <div class="segs ptabs" role="tablist" aria-label="Sections">${tabsHTML}</div>
+    <div class="ppane" data-pane="wear"${hid("wear")}>
     <dl class="facts">
       <dt>Worn</dt><dd>${s.count?`${s.count} time${s.count>1?'s':''} · ${esc(sinceWords(s.last).toLowerCase())}`:esc(sinceWords(null))}</dd>
       <dt>Fabric</dt><dd>${esc([f.name, f.note].filter(Boolean).join('. '))}</dd>
@@ -1753,9 +1759,15 @@ function sheetPiece(id){
       <div class="toggles"><label class="toggle"><span>On repeat<small id="repnote">${rep?`Since ${esc(shortDate(rep))}. Fades after ${ON_REPEAT_DAYS} days.`:'Wearing this a lot lately. No need to log each day.'}</small></span><input type="checkbox" class="switch" id="prepeat" data-id="${esc(id)}" ${rep?'checked':''}></label></div>
       <div class="toggles"><label class="toggle"><span>One I love<small>${loved(id)&&(loved(id).why||[]).length?esc(loved(id).why.map(k=>(LOVE_WHY.find(x=>x[0]===k)||[])[1]).join(' · ')):'Shown a little more often, and taught to the style rules.'}</small></span><input type="checkbox" class="switch" id="plove" data-id="${esc(id)}" ${loved(id)?'checked':''}></label></div>
       ${learned}
+      </div>
+    </div>
+    <div class="ppane" data-pane="details"${hid("details")}><div class="stack">
       <div class="field"><label class="cap" for="pbrand">Brand</label><input id="pbrand" value="${esc(p.brand||'')}" placeholder="From the label"></div>
       <div class="field"><label class="cap" for="pcomp">Composition</label><input id="pcomp" value="${esc(p.composition||'')}" placeholder="80% wool, 20% cashmere"></div>
       ${shapeFields(p)}
+      <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savepiece" data-id="${esc(id)}">Save</button></div>
+    </div></div>
+    <div class="ppane" data-pane="rules"${hid("rules")}><div class="stack">
       <div class="toggles">
         <label class="toggle"><span>Office days</span><input type="checkbox" class="switch" data-occ-toggle="office" ${(p.occasions||[]).includes('office')?'checked':''}></label>
         <label class="toggle"><span>Customer days<small>Smart enough for an important meeting.</small></span><input type="checkbox" class="switch" data-occ-toggle="customer" ${(p.occasions||[]).includes('customer')?'checked':''}></label>
@@ -1763,7 +1775,7 @@ function sheetPiece(id){
         <label class="toggle"><span>I don't wear this<small>Keeps it out of suggestions.</small></span><input type="checkbox" class="switch" id="paside" ${p.dontWear?'checked':''}></label>
       </div>
       <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savepiece" data-id="${esc(id)}">Save</button></div>
-    </div>`);
+    </div></div>`);
 }
 // Outfits built around one piece: today's weather unless the piece is plainly for another season.
 function looksWith(id, round){
@@ -2067,6 +2079,9 @@ document.addEventListener('click', async e=>{
   }
   if(t.dataset.status){ setStatus(t.dataset.id, t.dataset.status); return; }
   if(t.dataset.react!==undefined){ sheetReact(t.dataset.date, t.dataset.react || null); return; }
+  if(t.dataset.ptab){ const k = t.dataset.ptab, sh = t.closest('.sheet') || document;
+    sh.querySelectorAll('[data-ptab]').forEach(b=>b.setAttribute('aria-pressed', b===t));
+    sh.querySelectorAll('.ppane').forEach(el=>{ el.hidden = el.dataset.pane!==k; }); return; }
   if(t.dataset.piece){ sheetPiece(t.dataset.piece); return; }
   if(t.dataset.filter){ location.hash = '#closet/'+t.dataset.filter; return; }
   if(t.dataset.extra){ S.ui.keepPicks = currentPicks(); S.state.logExtra = S.state.logExtra===t.dataset.extra ? '' : t.dataset.extra; render(); restorePicks(); return; }

@@ -235,7 +235,7 @@ button.tag{cursor:pointer}
 .sheet{position:fixed;left:0;right:0;bottom:0;max-width:480px;margin:0 auto;max-height:88vh;overflow:auto;background:var(--panel);border-top:1px solid var(--ink);transform:translateY(102%);transition:transform .45s var(--ease);z-index:21;padding:0 0 calc(24px + env(safe-area-inset-bottom,0px))}
 .sheet.open{transform:none}
 .sheet .bar{position:sticky;top:0;background:var(--panel);display:flex;justify-content:space-between;align-items:center;padding:14px var(--gutter-r) 10px var(--gutter);border-bottom:1px solid var(--rule-soft);z-index:1}
-.sheet .big{display:grid;grid-template-rows:minmax(0,1fr);place-items:center;overflow:hidden;height:260px;background:var(--paper);margin:0 var(--gutter-r) 0 var(--gutter);padding:24px}
+.sheet .big{display:grid;grid-template-rows:minmax(0,1fr);place-items:center;overflow:hidden;height:210px;background:var(--paper);margin:0 var(--gutter-r) 0 var(--gutter);padding:24px}
 .sheet .big svg,.sheet .big img{max-height:100%;width:auto;max-width:70%}
 .sheet .big img{height:100%;object-fit:contain}
 .office{padding:0 0 4px}
@@ -267,6 +267,9 @@ body.sheet-open .toast{bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px)
 .try-img img{display:block;max-width:100%;max-height:320px;width:auto;height:auto;object-fit:contain}
 .try-prompt{margin-top:26px}
 .try-prompt textarea{min-height:190px;line-height:1.45}
+.ptabs{gap:22px;padding-top:14px;border-bottom:1px solid var(--rule-soft)}
+.ptabs button{padding-bottom:8px}
+.ppane[hidden]{display:none}
 .sheet h2.sec{padding:16px var(--gutter-r) 0 var(--gutter);font-size:22px;letter-spacing:.12em}
 .facts{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;padding:12px var(--gutter-r) 0 var(--gutter);margin:0;font-size:13.5px}
 .facts dt{color:var(--ink-2)}
