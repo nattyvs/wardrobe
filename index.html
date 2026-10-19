@@ -22,6 +22,7 @@
 :root{
   --paper:#FBFBFA; --panel:#ECE8E1; --ink:#2A2826; --ink-2:#5A564F; --rule:#2A2826; --rule-soft:#D3CCC1;
   --pink:#B3005E; --on-pink:#FFFFFF;
+  --wine:#5A1A2B; /* the weekday name on a day. Not a signal: pink keeps that job. */
   --didot:"W Didot","Didot","Bodoni 72","Bodoni MT",serif;
   --jost:"W Jost","Futura","Avenir Next","Helvetica Neue",Arial,sans-serif;
   --gutter:max(18px, env(safe-area-inset-left, 0px));
@@ -58,9 +59,10 @@ h2.sec{font:400 15px/1.2 var(--didot);letter-spacing:.2em;text-transform:upperca
 .sample-note a{color:var(--ink);text-underline-offset:3px;white-space:nowrap}
 
 /* ---------- today hero ---------- */
-.hero{position:relative;height:clamp(340px,95vw,410px);overflow:hidden;margin-top:2px}
-.hero .day{position:absolute;left:-.17em;top:-2px;font:400 clamp(96px,29vw,128px)/.86 var(--didot);letter-spacing:-.04em;white-space:nowrap}
-.hero .date{position:absolute;left:var(--gutter);top:clamp(86px,25.5vw,116px);font:400 13px/1 var(--didot);letter-spacing:.3em;text-transform:uppercase}
+.hero{position:relative;height:calc(clamp(340px,95vw,410px) + 112px);overflow:hidden;margin-top:2px}
+.hero .stage{position:absolute;left:0;right:0;top:36px;height:clamp(340px,95vw,410px)}
+.hero .day{position:absolute;left:-.17em;top:-2px;font:400 clamp(100px,35vw,140px)/.86 var(--didot);letter-spacing:-.04em;white-space:nowrap;color:var(--wine)}
+.hero .date{position:absolute;left:var(--gutter);top:clamp(90px,31vw,126px);font:400 13px/1 var(--didot);letter-spacing:.3em;text-transform:uppercase}
 .hero .temp{position:absolute;right:var(--gutter-r);top:12px;text-align:left;width:29%;background:var(--paper);border-left:1px solid var(--rule);padding-left:12px}
 .hero .temp .deg{font:400 46px/1 var(--didot);letter-spacing:-.02em}
 .hero .temp .fc{display:block;margin-top:6px;font:400 10.5px/1.35 var(--didot);letter-spacing:.16em;text-transform:uppercase}
@@ -71,6 +73,7 @@ h2.sec{font:400 15px/1.2 var(--didot);letter-spacing:.2em;text-transform:upperca
 .hero .piece .no{position:absolute;left:-2px;top:-14px;font:400 11px/1 var(--didot);letter-spacing:.1em}
 .hero .piece.fresh .no{color:var(--pink)}
 .hero .piece.slot-shoes .no{left:-22px;top:28%}
+.hero .piece.slot-bottom .no{left:auto;right:2px;top:auto;bottom:-16px}
 .hero .piece.slot-outer .no{left:auto;right:6%;top:-2px}
 
 /* the one authored moment: the spread settles into place */

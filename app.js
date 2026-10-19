@@ -893,12 +893,11 @@ function viewDay(date, settle){
     <div class="day" aria-hidden="true">${dayShort(date)}</div>
     <div class="date">${esc(nice(date))}${isToday?'':' · planned'}</div>
     <div class="temp"><div class="deg">${w?w.feel+'°':'–'}</div><span class="fc">${esc(forecastLine(w, date))}</span></div>
-    ${pieces || `<p class="empty" style="position:absolute;left:var(--gutter);top:45%">Nothing in the closet fits this day yet.</p>`}
+    <div class="stage">${pieces || `<p class="empty" style="position:absolute;left:var(--gutter);top:45%">Nothing in the closet fits this day yet.</p>`}</div>
   </section>
   <div class="credits">
     ${tripLine}
     <div class="occ"><button type="button" class="tag ${tagCls}" data-act="occ" data-date="${date}" aria-label="Occasion: ${OCC[occ.occ]}. Tap to change.">${OCC[occ.occ]}</button>${occ.note?`<span class="label">${esc(occ.note)}</span>`:''}</div>
-    <p class="credit-line">${o.list.map(({p},i)=>`<span><b>${pad(i+1)}</b> <button type="button" data-piece="${esc(p.id)}">${esc(p.name)}</button>${fabricOf(p).name?`, ${esc(fabricOf(p).name.toLowerCase())}`:''}</span>`).join(' ')}</p>
     <p class="why">${esc(whyLine(o, date))}</p>
     ${fnote?`<p class="caption facenote">${esc(fnote)}</p>`:''}
     ${o.adjusted?`<p class="adjusted">${esc(o.adjusted)}</p>`:''}

@@ -3,6 +3,7 @@ name: Wardrobe
 description: A daily fashion spread for one wardrobe, clothes on white paper, sand for notes, charcoal ink and a single pink signal.
 colors:
   signal-pink: "#B3005E"
+  wine-ink: "#5A1A2B"
   on-signal: "#FFFFFF"
   white-paper: "#FBFBFA"
   sand-panel: "#ECE8E1"
@@ -12,7 +13,7 @@ colors:
 typography:
   display:
     fontFamily: "\"W Didot\", Didot, \"Bodoni 72\", \"Bodoni MT\", serif"
-    fontSize: "clamp(96px, 29vw, 128px)"
+    fontSize: "clamp(100px, 35vw, 140px)"
     fontWeight: 400
     lineHeight: 0.86
     letterSpacing: "-0.04em"
@@ -134,6 +135,8 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 ### Primary
 - **Signal Pink** (`signal-pink`): Marks state the app wants noticed. Customer-day tag fill, the number and status line of a neglected or "fresh" piece, today's date in the week strip and Week list, the customer-day dot under a strip day, the closet lede's unworn count, the weather-adjustment note, input focus underline, text selection and caret. White text on pink (`on-signal`) only on the customer tag.
 
+- **Wine Ink** (`wine-ink`): The weekday name on a day, and nothing else. Added 19 Oct 2026 when Natalia chose the board layout for Today (a big wine day name over the collage on white). It ties the top of the page to the clothes without competing with them. It is not a signal and never marks state; pink keeps that job.
+
 ### Neutral
 - **White Paper** (`white-paper`): The ground wherever clothes are shown: the Today spread, Week, Closet, the piece image in sheets, the tab bar, and the text colour on ink-filled buttons. Natalia chose white for clothes (19 Oct 2026), as in direction one.
 - **Sand Panel** (`sand-panel`): Kept for supporting surfaces only: The Look and Colour and Fabric panels, and bottom sheet bodies. From the Quiet Signals reference. The only change of surface in the system.
@@ -144,7 +147,7 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 ### Named Rules
 **The Signal Rule.** Pink means "this needs your attention" and nothing else. If an element is pink, it must be a customer day, a neglected piece, today, an adjustment, or active input. Never a button fill, never a decorative accent, never an illustration colour.
 
-**The Garments Are the Colour Rule.** Chrome stays white, sand and charcoal so the clothes carry the colour of each screen. Clothes always sit on white.
+**The Garments Are the Colour Rule.** Chrome stays white, sand and charcoal so the clothes carry the colour of each screen. Clothes always sit on white. The one exception is the weekday name, set in wine ink.
 
 ## Typography
 
@@ -154,7 +157,7 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 **Character:** A fashion-magazine Didot for anything that is read as editorial (day names, piece names, reasons, temperatures, numbers) against a clean geometric Jost for anything that is operated or measured (buttons, tabs, tags, captions, compositions).
 
 ### Hierarchy
-- **Display** (Didot 400, clamp(96px, 29vw, 128px), line-height 0.86, -0.04em): The day name on Today, deliberately cropped off the left edge. One per screen.
+- **Display** (Didot 400, clamp(100px, 35vw, 140px), line-height 0.86, -0.04em, wine ink): The day name on Today, deliberately cropped off the left edge. One per screen.
 - **Headline** (Didot 400, 44px, line-height 1, 0.06em, uppercase): Page titles on Week, Closet, Log and Settings.
 - **Numerals** (Didot 400, 40 to 46px): The temperature on Today (46px) and day names in the Week list (40px, -0.03em). Tabular numerals in the week strip (19px).
 - **Title** (Didot 400, 19 to 20px, line-height 1.25 to 1.3): The one-sentence reason, page ledes, plan notes. Editorial sentences, max about 30ch.
@@ -173,7 +176,7 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 
 A single phone column, max 480px, centred; above 600px the column gets stone hairlines on both sides and the white ground continues beyond. Side gutters are 18px or the safe-area inset, whichever is larger. A fixed text tab bar (54px plus safe-area) sits at the bottom; content pads to clear it.
 
-Today is composed as a spread: the hero is a fixed-height stage (clamp(340px, 95vw, 410px)) with absolutely positioned layers: day name top-left cropped, date beneath, temperature block top-right at 29% width behind a charcoal hairline, and garment flats overlapping as an asymmetric flat-lay with numbered labels. Below it, the credits stack (occasion tag, numbered credit line, reason), actions, then the seven-column week strip.
+Today is composed as a spread: the hero is a fixed-height field with absolutely positioned layers: the day name top-left, cropped and in wine ink, the date beneath, the temperature block top-right at 29% width behind a charcoal hairline, and below the date a stage (clamp(340px, 95vw, 410px) tall, with room under it so long trousers are not cut) where garment photos overlap as an asymmetric flat-lay with numbered labels. A bottom piece carries its number under the hem so it does not sit on the outer layer. Below the hero: the occasion tag, the reason, actions, then the seven-column week strip. The numbered names live in The Look panel and open on tap from the stage; there is no separate credit line.
 
 Rhythm is built on list rows of 10 to 14px vertical padding separated by hairlines, 18 to 22px between blocks, and 22px/26px panel padding. Grids are explicit and quiet: notes rows of 28px number, 56px flat, text; closet three columns with 18px/14px gaps and 4:5 drawing cells; fabric swatches auto-fill at 132px minimum.
 
