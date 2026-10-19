@@ -1812,15 +1812,21 @@ function looksWith(id, round){
   S.ui.withShown = (round ? (S.ui.withShown||[]) : []).concat(out.map(o=>main(o).filter(x=>x!==id)));
   return {looks: out, label, occ};
 }
+// The day page's flat lay in miniature: pieces close together, in the same places.
+function miniLay(o, heroId){
+  const L = o.slots.outer ? LAYOUT : LAYOUT_NO_OUTER;
+  return `<div class="mini-lay" role="img" aria-label="${esc(o.list.map(({p})=>p.name).join(', '))}">${o.list.map(({slot,p})=>{ const pos = L[slot] || LAYOUT[slot]; if(!pos) return '';
+    return `<span class="piece slot-${slot}${p.id===heroId?' hero-piece':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;z-index:${pos.z||1}">${art(p)}</span>`; }).join('')}</div>`;
+}
 function sheetWith(id, round){
   const p = piece(id); if(!p) return;
   const {looks, label, occ} = looksWith(id, round);
   S.ui.withLooks = looks;
-  const card = (o, i) => `<li class="wl"><span class="thumbs">${o.list.map(({p:q})=>`<button type="button" class="th${q.id===id?' hero':''}" data-piece="${esc(q.id)}" aria-label="${esc(q.name)}">${art(q)}</button>`).join('')}</span>
+  const card = (o, i) => `<li class="wl">${miniLay(o, id)}
     <span class="names">${esc(o.list.map(({p:q})=>q.name).join(', '))}.</span>
     <span class="sub">${esc([o.score.note.colour, o.score.note.silhouette].filter(Boolean).join(' '))}</span>
     <span class="acts-inline"><button type="button" class="linkish" data-act="withtoday" data-i="${i}">Wear it today</button><button type="button" class="linkish" data-act="withtry" data-i="${i}">Try it on in ChatGPT</button></span></li>`;
-  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Outfits with this</span><button type="button" class="linkish" data-close>Done</button></div>
+  openSheet(`<div class="bar"><button type="button" class="linkish back" data-act="backpiece" data-id="${esc(id)}" aria-label="Back to ${esc(p.name)}">&#8249; Back</button><span class="cap" id="sheetTitle">Outfits with this</span><button type="button" class="linkish" data-close>Done</button></div>
     <div class="with-head"><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(label)} ${esc(OCC[occ]||'')} looks.</span></span></div>
     ${looks.length ? `<ul class="withlooks">${looks.map(card).join('')}</ul>` : `<p class="caption pad">Nothing convincing came together around this piece. It may be one to look at in Get more from it.</p>`}
     <div class="acts"><button type="button" class="btn ghost" data-act="withmore" data-id="${esc(id)}" data-round="${(round||0)+1}">Show me others</button></div>`);
@@ -2105,6 +2111,7 @@ document.addEventListener('click', async e=>{
   }
   if(act==='tryonsave'){ await saveTryon(); return; }
   if(act==='markdormant'){ sheetDormant(); return; }
+  if(act==='backpiece'){ sheetPiece(t.dataset.id); return; }
   if(act==='lookswith' || act==='withmore'){ t.textContent = 'Putting looks together…'; t.disabled = true; const id = t.dataset.id, r = act==='withmore' ? +t.dataset.round : 0; setTimeout(()=>sheetWith(id, r), 30); return; }
   if(act==='withtry'){ const o = (S.ui.withLooks||[])[+t.dataset.i]; if(o) sheetTryOn('look', o); return; }
   if(act==='withtoday'){ const o = (S.ui.withLooks||[])[+t.dataset.i]; if(!o) return; pinLook(TODAY, o.list.map(x=>x.p.id)); closeSheet(); location.hash = '#today'; render(); toast('Today’s look'); return; }
