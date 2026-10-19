@@ -388,10 +388,17 @@ function buildOne(date, opts){
     if(o==='off') s -= Math.max(0, (p.formality||2) - 2) * 0.6;
     if(o==='customer' && p.statement) s += 0.8;
     const ago = recentDays(p.id);
-    s += ago===999 ? 2.6 : Math.min(ago, 120)/40;
-    // Rest a piece after it has been worn or planned. Outer layers and shoes come back sooner.
-    const rest = (slot==='outer' || slot==='shoes') ? 2 : 3;
-    if(ago < rest) s -= 4; else if(rest===2 && ago < 4) s -= 1.5;
+    // Freshness. On a trip the suitcase is meant to be worn again and again, and a coat can be worn all week:
+    // only avoid the same piece two days running.
+    if(opts.scope){ const n = (opts.uses && opts.uses[p.id]) || 0, light = slot==='outer' || slot==='shoes';
+      if(!light && ago<1.5) s -= 2.5; s += Math.min(ago, 6)/12 - n*(light ? .15 : .55); }
+    else if(slot==='outer'){ s += Math.min(ago, 120)/240; }
+    else {
+      s += ago===999 ? 2.6 : Math.min(ago, 120)/40;
+      // Rest a piece after it has been worn or planned. Shoes come back sooner.
+      const rest = slot==='shoes' ? 2 : 3;
+      if(ago < rest) s -= 4; else if(rest===2 && ago < 4) s -= 1.5;
+    }
     if(slot==='shoes' && need>=4 && p.shape==='boot') s += 1.2;
     if(slot==='shoes' && w && w.rainChance>=60 && /suede/i.test(p.composition||'')) s -= 3;
     if(R.avoid[p.id]) s -= 3.5;
@@ -539,9 +546,10 @@ function lookScore(slots, date, opts){
   // Rotation: credit for bringing back what hasn't been out.
   const st = stats(date);
   const ago = p => { if(onRepeatSince(p.id, date)) return 2; let l = st[p.id] && st[p.id].last; const pl = opts.planned && opts.planned[p.id]; if(pl && (!l || pl>l)) l = pl; return l ? daysBetween(l, date) : 999; };
-  f.rotation = hasHistory() ? clothes.reduce((a,p)=>a + (ago(p)===999 ? 1 : Math.min(ago(p),90)/90), 0)/Math.max(1, clothes.length) : .5;
+  const rot = clothes.filter(p=>slotOf(p)!=='outer');
+  f.rotation = hasHistory() ? rot.reduce((a,p)=>a + (ago(p)===999 ? 1 : Math.min(ago(p),90)/90), 0)/Math.max(1, rot.length) : .5;
   note.rotation = '';
-  const w = weights(); if(opts.mode==='reliable'){ w.rotation *= .5; }
+  const w = weights(); if(opts.mode==='reliable'){ w.rotation *= .5; } if(opts.trip){ w.rotation *= .2; }
   let total = FACTORS.reduce((a,[k])=>a + w[k]*f[k], 0);
   if(clash) total *= .4; // a print clash sinks the look, it isn't just one factor among six
   return {f, note, total, clash};
@@ -559,7 +567,7 @@ function buildOutfit(date, opts){
   if(opts.fast) return buildOne(date, opts);
   const mode = opts.mode || modeFor(date);
   const cands = [], seen = new Set();
-  const add = r => { const k = lookKey(r.slots); if(seen.has(k)) return; seen.add(k); r.score = lookScore(r.slots, date, {planned:opts.planned, mode}); cands.push(r); };
+  const add = r => { const k = lookKey(r.slots); if(seen.has(k)) return; seen.add(k); r.score = lookScore(r.slots, date, {planned:opts.planned, mode, trip:!!opts.scope}); cands.push(r); };
   for(let i=0; i<16; i++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed: i ? 'v'+i : ''})));
   const best = arr => arr.slice().sort((a,b)=>b.score.total-a.score.total)[0];
   // A second pass leaves out the first choice's main pieces, so the shortlist has real alternatives.
@@ -578,7 +586,7 @@ function buildOutfit(date, opts){
     const restScore = p => { const l = st[p.id] && st[p.id].last; return (l ? Math.min(daysBetween(l,date),180) : 365) - (loved(p.id)?60:0) - (onRepeatSince(p.id,date)?300:0) + hash(date+p.id)*20; };
     const heroes = pool.sort((a,b)=>restScore(b)-restScore(a)).slice(0,6);
     const hc = [];
-    heroes.forEach(h=>{ for(let i=0;i<3;i++){ const r = buildOne(date, Object.assign({}, opts, {hero:h, seed:'h'+i})); const k = lookKey(r.slots); if(seen.has(k)) continue; seen.add(k); r.score = lookScore(r.slots, date, {planned:opts.planned, mode}); r.hero = h; hc.push(r); cands.push(r); } });
+    heroes.forEach(h=>{ for(let i=0;i<3;i++){ const r = buildOne(date, Object.assign({}, opts, {hero:h, seed:'h'+i})); const k = lookKey(r.slots); if(seen.has(k)) continue; seen.add(k); r.score = lookScore(r.slots, date, {planned:opts.planned, mode, trip:!!opts.scope}); r.hero = h; hc.push(r); cands.push(r); } });
     const hb = best(hc);
     if(hb && hb.score.total >= pick.score.total*0.88) pick = hb;
     else fallback = 'Nothing rarely worn made a convincing look today, so this is the reliable one.';
@@ -757,12 +765,12 @@ function tripContext(t){
 }
 // One look per trip day from the suitcase, in date order, so each piece is rested between wears. Rewears are on purpose.
 function planLooks(t, ids){
-  const scope = new Set(ids), planned = {}, looks = {};
+  const scope = new Set(ids), planned = {}, looks = {}, uses = {};
   tripDays(t).forEach(date=>{
     const logged = log().find(e=>e.date===date && e.source!=='sample' && e.items && e.items.length);
     if(logged){ logged.items.forEach(id=>planned[id] = date); return; }
-    const res = applySwaps(buildOutfit(date, {scope, planned}), date);
-    res.list.forEach(({p})=>planned[p.id] = date);
+    const res = applySwaps(buildOutfit(date, {scope, planned, uses}), date);
+    res.list.forEach(({p})=>{ planned[p.id] = date; uses[p.id] = (uses[p.id]||0)+1; });
     looks[date] = res;
   });
   return looks;
