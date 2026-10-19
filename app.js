@@ -1136,14 +1136,13 @@ function viewWeek(){
   const note = S.plan && S.plan.week && S.plan.note && monday(S.plan.weekStart||TODAY)===days[0] ? S.plan.note : null;
   const rows = days.map(d=>{ const t = activeTrip(d); return dayRowHTML(d, t ? shortPlace((t.stops[stopIndexFor(t,d)]||{}).place) : ''); }).join('');
   return `${masthead()}
-  <header class="pagehead"><h1 class="page">This week</h1><p class="cap">Week ${isoWeek(TODAY)} · ${esc(nice(days[0]))} to ${esc(nice(days[6]))}</p></header>
+  <header class="pagehead withlink"><h1 class="page">This week</h1><a class="toplink" href="#trips"><span class="label">Trips</span></a><p class="cap">Week ${isoWeek(TODAY)} · ${esc(nice(days[0]))} to ${esc(nice(days[6]))}</p></header>
   ${tripStripHTML()}
   <div class="officepick">${officePicker()}</div>
   ${note?`<div class="plan-note"><span class="label">From Claude</span>${esc(note)}</div>`:''}
   <hr class="rule">
   ${inspoRowsHTML(TODAY) ? `<section class="officelooks"><span class="cap pad">Office looks to keep in mind</span><ul class="days">${inspoRowsHTML(TODAY)}</ul></section>` : ''}
-  <ul class="days">${rows}</ul>
-  <div class="acts"><a class="btn ghost" href="#trips">${upcomingTrips().length?'Trips':'Plan a trip'}</a></div>`;
+  <ul class="days">${rows}</ul>`;
 }
 
 function doubles(){

@@ -223,7 +223,7 @@ Tight, tracked and square; they read like the small print in a magazine.
 
 ### Navigation
 - **Masthead:** "WARDROBE" in Didot 12px at 0.42em left; the city as an underlined Jost label right.
-- **Tab bar:** fixed, white ground, charcoal top rule, four text labels (Today, Week, Closet, Log). Inactive stone, active charcoal with a 1px underline. No icons.
+- **Tab bar:** fixed, white ground, charcoal top rule, five tabs (Today, Week, Closet, Style, Log), each a 22px line icon above a 9.5px label. Icons are 1.3px strokes in currentColor (sun, calendar, hanger, four-point star, circled tick), 1.6px when active. Inactive stone, active charcoal with a 1px underline on the label. Trips is not a tab: it is a text link at the top right of the Week page.
 - **Filters and segments:** horizontal scrolling text labels; pressed state is charcoal with an underline, the count in Didot.
 
 ### Garment Flat (signature)
@@ -279,6 +279,6 @@ Bottom sheet on sand with the piece image on white, charcoal top rule, sticky ba
 ### Don't:
 - **Don't** fill a button or any other control with pink.
 - **Don't** use cards, drop shadows or rounded corners; the customer-day dot is the only round mark.
-- **Don't** add icons to the tab bar or buttons; navigation is text. The Repeat Mark is the only exception.
+- **Don't** add icons to buttons or add a sixth tab. Icons belong to the tab bar and the Repeat Mark only. Trips lives on the Week page.
 - **Don't** put clothes on sand, grey or any tinted ground; clothes sit on white. Don't add a dark theme.
 - **Don't** set uppercase without tracking, or set action buttons, tags or tabs in Didot.
