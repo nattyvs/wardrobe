@@ -346,7 +346,7 @@ function compatible(a,b){
 
 /* ---------------- outfit engine ---------------- */
 const NEUTRAL = /black|white|ivory|cream|grey|gray|charcoal|navy|camel|stone|beige|brown|tan|indigo|denim|taupe|sand/;
-const targetWarmth = need => ({outer: need>=4?5 : need===3?3 : 2, top: need>=4?4 : need===3?3 : need===2?2 : 1, bottom: need>=3?3 : 2, dress: need>=3?3:1, shoes: need>=4?3 : need===3?2 : 1, accessory: need>=4?3 : 1});
+const targetWarmth = need => ({outer: need>=4?5 : need===3?3 : 2, top: need>=4?4 : need===3?3 : need===2?2 : 1, bottom: need>=3?3 : 2, dress: need>=3?3:1, shoes: need>=5?3 : need>=3?2 : 1, accessory: need>=4?3 : 1});
 // opts.scope: a Set of ids to draw from (the suitcase). opts.planned: {id: date} of looks already planned, so rewears are spaced out.
 /* Proportion and colour harmony. Fullness and bulk are read from the piece name, because the closet has no field for them. */
 const FULL = p => !!p && p.shape==='skirt' && /pleat|midi|maxi|full|circle|a-line|flare|tiered|gather|wrap/i.test(p.name||'');
@@ -384,9 +384,10 @@ function buildOne(date, opts){
   const target = targetWarmth(need);
   function score(p, slot){
     let s = 0;
-    if(target[slot]!=null) s -= Math.abs(warmthOf(p) - target[slot]) * 1.1;
-    // Trainers are fine on customer days; shoes get a lighter formality pull than clothes.
-    s -= Math.max(0, formal - (p.formality||2)) * (slot==='shoes' ? 0.5 : 1.6);
+    if(target[slot]!=null) s -= Math.abs(warmthOf(p) - target[slot]) * (slot==='shoes' ? 0.6 : 1.1);
+    // She wears trainers to the office and to customer meetings: no formality pull on them there.
+    // Other shoes get a lighter formality pull than clothes.
+    if(!(slot==='shoes' && p.shape==='trainer' && (!p.occasions || !p.occasions.length || p.occasions.includes(o)))) s -= Math.max(0, formal - (p.formality||2)) * (slot==='shoes' ? 0.5 : 1.6);
     if(o==='off') s -= Math.max(0, (p.formality||2) - 2) * 0.6;
     if(o==='customer' && p.statement) s += 0.8;
     const ago = recentDays(p.id);
@@ -401,7 +402,8 @@ function buildOne(date, opts){
       const rest = slot==='shoes' ? 2 : 3;
       if(ago < rest) s -= 4; else if(rest===2 && ago < 4) s -= 1.5;
     }
-    if(slot==='shoes' && need>=4 && p.shape==='boot') s += 1.2;
+    // Boots earn their place on properly cold or wet days, not on every autumn day.
+    if(slot==='shoes' && p.shape==='boot') s += need>=5 ? 1.2 : (w && w.rainChance>=60) ? 0.8 : need>=4 ? 0.3 : 0;
     if(slot==='shoes' && w && w.rainChance>=60 && /suede/i.test(p.composition||'')) s -= 3;
     if(R.avoid[p.id]) s -= 3.5;
     if(R.loved[p.id]) s += 0.8;
