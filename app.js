@@ -1220,43 +1220,105 @@ function doubles(){
   const g = {}; closet().forEach(p=>{ const k = [p.cat,p.shape,(p.colour||'').toLowerCase(),(p.name||'').toLowerCase()].join('|'); (g[k]=g[k]||[]).push(p); });
   return Object.values(g).filter(a=>a.length>1);
 }
+// Types for the sticky bar, kinds for the drawer's second row, colour families for the dots.
+const isKnitTop = p => p.cat==='top' && (p.shape==='jumper' || (p.shape==='knit' && !/cotton turtleneck/i.test(p.name||'')));
+const CTYPES = [
+  ['coats','Coats', p=>p.cat==='outer' && p.shape!=='jumper'],
+  ['tops','Tops', p=>p.cat==='top' && !isKnitTop(p)],
+  ['knits','Knits', p=>isKnitTop(p) || (p.cat==='outer' && p.shape==='jumper')],
+  ['trousers','Trousers', p=>p.cat==='bottom' && p.shape!=='skirt'],
+  ['skirts','Skirts', p=>p.cat==='bottom' && p.shape==='skirt'],
+  ['dresses','Dresses', p=>p.cat==='dress'],
+  ['shoes','Shoes', p=>p.cat==='shoes'],
+  ['bags','Bags', p=>p.cat==='bag'],
+  ['extras','Extras', p=>p.cat==='accessory']
+];
+const nm = p => (p.name||'').toLowerCase();
+const byLength = [['mini','Mini',p=>p.length==='mini'],['knee','Knee',p=>p.length==='knee'],['midi','Midi',p=>p.length==='midi'],['maxi','Maxi',p=>p.length==='maxi']];
+const KINDS = {
+  coats:[['puffers','Puffers',p=>/puffer|down/.test(nm(p))],['jackets','Jackets',p=>!/puffer|down/.test(nm(p)) && (p.shape==='blazer' || /jacket|bomber/.test(nm(p)))],['coats','Coats',p=>!/puffer|down/.test(nm(p)) && p.shape!=='blazer' && !/jacket|bomber/.test(nm(p))]],
+  tops:[['tees','T-shirts',p=>p.shape==='tee' && !/vest|cami|halter|long-sleeve/.test(nm(p))],['long','Long-sleeve',p=>/long-sleeve|turtleneck|crew/.test(nm(p))],['vests','Vests and camis',p=>/vest|cami|halter/.test(nm(p))],['blouses','Blouses and shirts',p=>p.shape==='shirt' || /blouse|shirt/.test(nm(p))]],
+  knits:[['jumpers','Jumpers',p=>p.cat==='top' && p.shape==='jumper'],['rollnecks','Roll-necks',p=>p.cat==='top' && p.shape==='knit'],['cardigans','Cardigans',p=>p.cat==='outer']],
+  trousers:[['jeans','Jeans',p=>p.shape==='jeans'],['trousers','Trousers',p=>p.shape!=='jeans' && !/shorts/.test(nm(p))],['shorts','Shorts',p=>/shorts/.test(nm(p))]],
+  skirts:byLength, dresses:byLength,
+  shoes:[['trainers','Trainers',p=>p.shape==='trainer'],['boots','Boots',p=>p.shape==='boot'],['flats','Flats',p=>p.shape==='flat']],
+  bags:[['crossbody','Crossbody',p=>/crossbody|pouch/.test(nm(p))],['shoulder','Shoulder and totes',p=>!/crossbody|pouch/.test(nm(p))]],
+  extras:[['scarves','Scarves',p=>p.shape==='scarf'],['belts','Belts',p=>p.shape==='belt'],['straps','Bag straps',p=>p.shape==='strap']]
+};
+const CFAM = [['black','Black','#1E1E1E',/black|jet/],['white','White and cream','#EFE9DC',/white|ivory|ecru|cream|oyster|stone|beige|oatmeal|sand/],['grey','Grey','#9A9A9A',/grey|gray|charcoal|silver|slate/],['navy','Navy','#1C2440',/navy/],['blue','Blue and denim','#4F6E9E',/blue|denim|indigo|chambray|cobalt|teal|turquoise/],['brown','Brown and camel','#A87A4F',/brown|camel|\btan\b|taupe|chocolate|rust|cognac/],['red','Red and burgundy','#8E2335',/\bred\b|burgundy|wine|raspberry|oxblood|maroon|cherry/],['pink','Pink','#E3A9B8',/pink|blush|rose|fuchsia/],['purple','Purple','#6E4D8E',/purple|lilac|plum|violet|lavender|mauve/],['green','Green and khaki','#5E6B45',/green|khaki|olive|sage|mint|emerald/],['yellow','Yellow and orange','#D9A23A',/yellow|mustard|orange|gold|ochre/],['multi','Multicolour','conic-gradient(#B2262E,#D9B43A,#3F6B48,#2F5BA8,#6E4D8E,#B2262E)',/multi|rainbow/]];
+const famsOf = p => { const c = (p.colour||'').toLowerCase(); return CFAM.filter(f=>f[3].test(c)).map(f=>f[0]); };
+function closetFilters(){ return S.ui.cf || (S.ui.cf = {type:'all', kind:null, colours:[], q:''}); }
+function closetMatch(p, cf, opts){
+  opts = opts || {};
+  if(!opts.noType && cf.type!=='all'){ const T = CTYPES.find(t=>t[0]===cf.type); if(!T || !T[2](p)) return false;
+    if(!opts.noKind && cf.kind){ const K = (KINDS[cf.type]||[]).find(k=>k[0]===cf.kind); if(K && !K[2](p)) return false; } }
+  if(!opts.noColour && cf.colours.length && !famsOf(p).some(f=>cf.colours.includes(f))) return false;
+  const q = (cf.q||'').trim().toLowerCase();
+  if(q){ const hay = [p.name, p.colour, p.brand, p.composition, fabricOf(p).name, (p.styleTags||[]).join(' ')].join(' ').toLowerCase(); if(!q.split(/\s+/).every(w=>hay.includes(w))) return false; }
+  return true;
+}
 function viewCloset(filter){
   if(filter==='more') return viewMore();
-  const st = stats(), all = closet();
+  const st = stats(), all = closet(), cf = closetFilters();
   const live = p => !p.dontWear && statusOf(p)!=='donate';
   const neglected = p => { const l = st[p.id].last; return live(p) && l && daysBetween(l, TODAY) >= 60 && !onRepeatSince(p.id); };
   const never = p => live(p) && !st[p.id].last && !onRepeatSince(p.id);
   const dbl = doubles(), dblIds = new Set(dbl.flat().map(p=>p.id));
-  const F = {all:{l:'All', f:p=>true}, rare:{l:'Rarely worn', f:neglected}, never:{l:'Never worn', f:never}, repeat:{l:'On repeat', f:p=>!!onRepeatSince(p.id)}, doubles:{l:'Doubles', f:p=>dblIds.has(p.id)}, away:{l:'Not available', f:p=>!p.dontWear && statusOf(p)!=='available' && statusOf(p)!=='donate'}, donate:{l:'Donate', f:p=>statusOf(p)==='donate'}, aside:{l:'Set aside', f:p=>p.dontWear}};
+  const F = {all:{l:'Everything', f:p=>true}, rare:{l:'Rarely worn', f:neglected}, never:{l:'Never worn', f:never}, repeat:{l:'On repeat', f:p=>!!onRepeatSince(p.id)}, doubles:{l:'Doubles', f:p=>dblIds.has(p.id)}, away:{l:'Not available', f:p=>!p.dontWear && statusOf(p)!=='available' && statusOf(p)!=='donate'}, donate:{l:'Donate', f:p=>statusOf(p)==='donate'}, aside:{l:'Set aside', f:p=>p.dontWear}};
   if(!F[filter]) filter = 'all';
-  const counts = {}; Object.keys(F).forEach(k=>counts[k]=all.filter(F[k].f).length);
-  const filters = Object.entries(F).map(([k,v])=>`<button type="button" class="label" data-filter="${k}" aria-pressed="${k===filter}">${v.l}<span class="n">${counts[k]}</span></button>`).join('');
-  // the editorial read of the wardrobe
+  S.ui.closetFilter = filter;
+  // the editorial read, in one line
   const col = {}; all.forEach(p=>{ const c=(p.colour||'other').toLowerCase(); col[c]=(col[c]||0)+1; });
   const top = Object.entries(col).sort((a,b)=>b[1]-a[1])[0];
   const share = top ? top[1]/all.length : 0;
   const frac = share>=.45?'nearly half' : share>=.3?'a third' : share>=.22?'a quarter' : share>=.15?'a fifth' : null;
-  const rareN = counts.rare + counts.never;
-  const lede = `${all.length} pieces.${top&&frac?` ${cap1(top[0])} does ${frac} of the work.`:''}${!hasHistory() ? ' Your wear history starts with the first log.' : rareN?` <em>${rareN} haven't been worn in two months.</em>`:''}`;
+  const lede = `${all.length} pieces${top&&frac?` · ${esc(top[0])} does ${frac} of the work`:''}`;
+  const base = all.filter(F[filter].f);
+  const typeBar = [['all','All', ()=>true], ...CTYPES].map(([k,l,f])=>{ const n = base.filter(p=>f(p) && closetMatch(p, cf, {noType:true, noKind:true})).length; return `<button type="button" class="label" data-ctype="${k}" aria-pressed="${cf.type===k}">${l}<span class="n">${n}</span></button>`; }).join('');
+  const active = (cf.kind?1:0) + cf.colours.length + (cf.q.trim()?1:0) + (filter!=='all'?1:0);
+  const scope = base.filter(p=>closetMatch(p, cf, {noKind:true, noColour:true}));
+  const kinds = cf.type!=='all' ? (KINDS[cf.type]||[]).map(([k,l,f])=>[k,l,scope.filter(f).length]).filter(x=>x[2]) : [];
+  const fams = CFAM.map(f=>[f, scope.filter(p=>famsOf(p).includes(f[0])).length]).filter(x=>x[1]);
+  const drawer = `<div class="cscrim${S.ui.drawer?' open':''}" data-act="closedrawer"></div>
+  <aside class="cdrawer${S.ui.drawer && !S.ui.drawerJust?' open':''}" aria-label="Filters" ${S.ui.drawer?'':'aria-hidden="true"'}>
+    <div class="cd-bar"><span class="cap">Filter</span><button type="button" class="linkish" data-act="closedrawer">Close</button></div>
+    <div class="cd-body">
+      <label class="cap" for="cq">Search</label><input id="cq" type="search" value="${esc(cf.q)}" placeholder="Name, colour, brand, fabric" autocomplete="off">
+      ${kinds.length ? `<span class="cap">${esc((CTYPES.find(t=>t[0]===cf.type)||[])[1])}</span><div class="segs wrap" role="group">${kinds.map(([k,l,n])=>`<button type="button" class="label" data-ckind="${k}" aria-pressed="${cf.kind===k}">${l}<span class="n">${n}</span></button>`).join('')}</div>` : ''}
+      <span class="cap">Colour</span><div class="cdots" role="group" aria-label="Colour">${fams.map(([f,n])=>`<button type="button" class="cdot" data-cfam="${f[0]}" aria-pressed="${cf.colours.includes(f[0])}" aria-label="${f[1]}, ${n}" title="${f[1]}"><i style="background:${f[2]}"></i><span>${n}</span></button>`).join('')}</div>
+      <span class="cap">Show</span><div class="segs wrap" role="group">${Object.entries(F).map(([k,v])=>`<button type="button" class="label" data-filter="${k}" aria-pressed="${k===filter}">${v.l}</button>`).join('')}</div>
+      <div class="acts"><button type="button" class="btn" data-act="closedrawer">Show <span id="cd-n">${closetCount()}</span></button><button type="button" class="linkish" data-act="clearfilters">Clear all</button></div>
+    </div></aside>`;
+  return `${masthead()}
+  <header class="pagehead withlink compact"><h1 class="page">Closet</h1><a class="toplink" href="#closet/more"><span class="label">Get more from it</span></a><p class="lede">${lede}</p></header>
+  <div class="ctypes"><button type="button" class="cfilter" data-act="opendrawer" aria-label="Filter${active?`, ${active} on`:''}"><svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M3 5h14M6 10h8M8.5 15h3"/></svg>${active?`<b>${active}</b>`:''}</button><div class="filters" role="toolbar" aria-label="Type">${typeBar}</div></div>
+  <div id="closet-results">${closetBody()}</div>
+  ${drawer}`;
+}
+function closetCount(){ const f = S.ui.closetFilter || 'all'; return closetList(f).length; }
+function closetList(filter){
+  const st = stats(), cf = closetFilters();
+  const live = p => !p.dontWear && statusOf(p)!=='donate';
+  const dblIds = new Set(doubles().flat().map(p=>p.id));
+  const FF = {all:p=>true, rare:p=>{ const l = st[p.id].last; return live(p) && l && daysBetween(l, TODAY) >= 60 && !onRepeatSince(p.id); }, never:p=>live(p) && !st[p.id].last && !onRepeatSince(p.id), repeat:p=>!!onRepeatSince(p.id), doubles:p=>dblIds.has(p.id), away:p=>!p.dontWear && statusOf(p)!=='available' && statusOf(p)!=='donate', donate:p=>statusOf(p)==='donate', aside:p=>p.dontWear};
+  return closet().filter(FF[filter] || FF.all).filter(p=>closetMatch(p, cf));
+}
+function closetBody(){
+  const st = stats(), cf = closetFilters(), filter = S.ui.closetFilter || 'all';
+  const live = p => !p.dontWear && statusOf(p)!=='donate';
   const item = p => { const s = st[p.id], rep = onRepeatSince(p.id), sx = statusOf(p);
     const fresh = hasHistory() && live(p) && sx==='available' && !rep && (!s.last || daysBetween(s.last, TODAY)>=60);
-    const line = p.dontWear ? 'Set aside' : sx!=='available' ? STATUS[sx] : rep ? `On repeat since ${shortDate(rep)}` : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : sinceWords(null);
-    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span><span class="st${fresh?' fresh':''}">${esc(line)}</span></button>${loveBtn(p.id)}${repeatBtn(p.id)}</div>`; };
-  let body = '';
-  const list = all.filter(F[filter].f);
+    const line = p.dontWear ? 'Set aside' : sx!=='available' ? STATUS[sx] : rep ? `On repeat since ${shortDate(rep)}` : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : '';
+    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span>${line?`<span class="st${fresh?' fresh':''}">${esc(line)}</span>`:''}</button>${loveBtn(p.id)}${repeatBtn(p.id)}</div>`; };
+  const list = closetList(filter);
   if(filter==='doubles'){
-    body = dbl.length ? dbl.map(g=>`<section class="group"><h2 class="sec">${esc(g[0].name)} × ${g.length}</h2><p class="caption" style="margin:8px 0 0">Same piece, ${g.length} times. Worn ${g.map(p=>st[p.id].count).join(' and ')} times. Keep one in rotation and decide on the other.</p><div class="grid">${g.map(item).join('')}</div></section>`).join('') : `<div class="group"><p class="empty">No doubles. Every piece is one of a kind.</p></div>`;
-  } else if(filter==='all'){
-    const CATS = [['outer','Outerwear'],['top','Tops and knits'],['bottom','Trousers and skirts'],['dress','Dresses'],['shoes','Shoes'],['accessory','Scarves and belts'],['bag','Bags']];
-    body = CATS.map(([c,l])=>{ const xs = list.filter(p=>p.cat===c); return xs.length ? `<section class="group"><h2 class="sec">${l}</h2><div class="grid">${xs.map(item).join('')}</div></section>` : ''; }).join('');
-  } else {
-    const empty = {aside:'Nothing set aside. Open a piece and switch on "I don\'t wear this" to park it here.', repeat:'Nothing on repeat. Tap the arrows on a piece you keep reaching for.', away:'Everything is available. Mark a piece as in the wash, at the dry cleaner or being repaired from its sheet.', donate:'Nothing earmarked for donating. Open a piece and choose Donate to park it here.'}[filter] || 'Nothing here. Everything is in rotation.';
-    body = `<div class="group">${list.length ? `<div class="grid">${list.map(item).join('')}</div>` : `<p class="empty">${empty}</p>`}</div>`;
+    const ids = new Set(list.map(p=>p.id)), dbl = doubles().filter(g=>g.some(p=>ids.has(p.id)));
+    return dbl.length ? dbl.map(g=>`<section class="group"><h2 class="sec">${esc(g[0].name)} × ${g.length}</h2><p class="caption" style="margin:8px 0 0">Same piece, ${g.length} times. Worn ${g.map(p=>st[p.id].count).join(' and ')} times. Keep one in rotation and decide on the other.</p><div class="grid">${g.map(item).join('')}</div></section>`).join('') : `<div class="group"><p class="empty">No doubles. Every piece is one of a kind.</p></div>`;
   }
-  return `${masthead()}
-  <header class="pagehead withlink"><h1 class="page">Closet</h1><a class="toplink" href="#closet/more"><span class="label">Get more from it</span></a><p class="lede">${lede}</p></header>
-  <div class="filters" role="toolbar" aria-label="Filter the closet">${filters}</div>
-  ${body}`;
+  const narrowed = cf.kind || cf.colours.length || cf.q.trim() || filter!=='all';
+  if(!list.length) return `<div class="group"><p class="empty">Nothing matches. <button type="button" class="linkish" data-act="clearfilters">Clear the filters</button></p></div>`;
+  if(cf.type==='all' && !narrowed) return CTYPES.map(([k,l,f])=>{ const xs = list.filter(f); return xs.length ? `<section class="group"><h2 class="sec">${l}</h2><div class="grid">${xs.map(item).join('')}</div></section>` : ''; }).join('');
+  return `<div class="group">${narrowed ? `<p class="caption cres">${list.length} piece${list.length===1?'':'s'} · <button type="button" class="linkish" data-act="clearfilters">Clear filters</button></p>` : ''}<div class="grid">${list.map(item).join('')}</div></div>`;
 }
 
 /* ---------------- get more from what you own ----------------
@@ -2139,6 +2201,9 @@ document.addEventListener('click', async e=>{
     sh.querySelectorAll('.ppane').forEach(el=>{ el.hidden = el.dataset.pane!==k; }); return; }
   if(t.dataset.piece){ sheetPiece(t.dataset.piece); return; }
   if(t.dataset.filter){ location.hash = '#closet/'+t.dataset.filter; return; }
+  if(t.dataset.ctype){ const cf = closetFilters(); cf.type = t.dataset.ctype; cf.kind = null; render(); window.scrollTo({top:0}); return; }
+  if(t.dataset.ckind){ const cf = closetFilters(); cf.kind = cf.kind===t.dataset.ckind ? null : t.dataset.ckind; render(); return; }
+  if(t.dataset.cfam){ const cf = closetFilters(), f = t.dataset.cfam; cf.colours = cf.colours.includes(f) ? cf.colours.filter(x=>x!==f) : [...cf.colours, f]; render(); return; }
   if(t.dataset.extra){ S.ui.keepPicks = currentPicks(); S.state.logExtra = S.state.logExtra===t.dataset.extra ? '' : t.dataset.extra; render(); restorePicks(); return; }
   if(t.dataset.feel){ document.querySelectorAll('[data-feel]').forEach(b=>b.setAttribute('aria-pressed', b===t ? 'true':'false')); return; }
   if(t.dataset.swapslot){ S.ui.swapSlot = t.dataset.swapslot; sheetSwap(route().arg||TODAY); return; }
@@ -2169,6 +2234,9 @@ document.addEventListener('click', async e=>{
     S.ui.confirmRm = null; removeWornPhoto(d); render(); toast('Photo removed'); return;
   }
   if(act==='markdormant'){ sheetDormant(); return; }
+  if(act==='opendrawer'){ S.ui.drawer = true; S.ui.drawerJust = true; render(); requestAnimationFrame(()=>requestAnimationFrame(()=>{ S.ui.drawerJust = false; const d = document.querySelector('.cdrawer'); if(d) d.classList.add('open'); })); return; }
+  if(act==='closedrawer'){ S.ui.drawer = false; const d = document.querySelector('.cdrawer'), sc = document.querySelector('.cscrim'); if(d) d.classList.remove('open'); if(sc) sc.classList.remove('open'); setTimeout(render, 260); return; }
+  if(act==='clearfilters'){ S.ui.cf = {type:closetFilters().type, kind:null, colours:[], q:''}; if((S.ui.closetFilter||'all')!=='all'){ location.hash = '#closet'; } render(); return; }
   if(act==='backpiece'){ sheetPiece(t.dataset.id); return; }
   if(act==='lookswith' || act==='withmore'){ t.textContent = 'Putting looks together…'; t.disabled = true; const id = t.dataset.id, r = act==='withmore' ? +t.dataset.round : 0; setTimeout(()=>sheetWith(id, r), 30); return; }
   if(act==='withtry'){ const o = (S.ui.withLooks||[])[+t.dataset.i]; if(o) sheetTryOn('look', o); return; }
@@ -2296,6 +2364,7 @@ document.addEventListener('scroll', e=>{
 }, true);
 document.addEventListener('input', e=>{
   const sx = e.target;
+  if(sx.id==='cq'){ closetFilters().q = sx.value; const r = $('#closet-results'); if(r) r.innerHTML = closetBody(); const n = $('#cd-n'); if(n) n.textContent = closetCount(); return; }
   if(sx.id==='looknote' && S.ui.look) S.ui.look.note = sx.value;
   if(sx.id==='insponote' && S.ui.inspo) S.ui.inspo.note = sx.value;
   if(sx.id==='inspourl' && S.ui.inspo) S.ui.inspo.url = sx.value;
