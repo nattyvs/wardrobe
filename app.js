@@ -606,15 +606,25 @@ function rateLook(date, y){
   const o = outfitFor(date); if(!o || !o.list || !o.list.length) return;
   const sc = o.score || lookScore(o.slots, date, {mode:o.mode});
   const items = o.list.map(x=>x.p.id);
-  S.style.ratings = ((S.style.ratings||[]).filter(r=>r.date!==date)).concat([{date, items, y, mode:o.mode||'reliable', f:sc.f, at:Date.now()}]);
-  // Learn: move weight towards the factors that were high in looks she liked, away from them in looks she didn't.
-  const w = weights(), mean = FACTORS.reduce((a,[k])=>a+sc.f[k],0)/FACTORS.length, pred = sc.total;
-  FACTORS.forEach(([k])=>{ w[k] = Math.max(.03, w[k] + 0.08*((y?1:0) - pred)*(sc.f[k]-mean)); });
-  const t = Object.values(w).reduce((a,b)=>a+b,0); Object.keys(w).forEach(k=>w[k] = Math.round(w[k]/t*1000)/1000);
-  S.style.weights = w;
+  S.style.ratings = ((S.style.ratings||[]).filter(r=>r.date!==date || r.src)).concat([{date, items, y, mode:o.mode||'reliable', f:sc.f, at:Date.now()}]);
+  learnFrom(sc, y, 0.08); if(y) pinLook(date, items);
   queuePush({style:true});
 }
-const ratingFor = date => ((S.style && S.style.ratings) || []).find(r=>r.date===date);
+// Move weight towards the factors that were high in looks she liked, away from them in looks she didn't.
+// A worn look teaches at full rate; a ChatGPT render at half.
+// Keep a loved look on its day, so the learning it triggers can't swap it for another.
+function pinLook(date, items){
+  if(!isoDate(date)) return;
+  const sw = {}; SLOT_ORDER.forEach(k=>sw[k]=null); (items||[]).map(piece).filter(Boolean).forEach(p=>sw[slotOf(p)] = p.id);
+  S.state.swaps[date] = sw; queuePush({state:true});
+}
+function learnFrom(sc, y, lr){
+  const w = weights(), mean = FACTORS.reduce((a,[k])=>a+sc.f[k],0)/FACTORS.length, pred = sc.total;
+  FACTORS.forEach(([k])=>{ w[k] = Math.max(.03, w[k] + lr*((y?1:0) - pred)*(sc.f[k]-mean)); });
+  const t = Object.values(w).reduce((a,b)=>a+b,0); Object.keys(w).forEach(k=>w[k] = Math.round(w[k]/t*1000)/1000);
+  S.style.weights = w;
+}
+const ratingFor = date => ((S.style && S.style.ratings) || []).find(r=>r.date===date && !r.src);
 function applySwaps(res, date){
   const sw = S.state.swaps[date] || {};
   Object.entries(sw).forEach(([k,id])=>{ if(id===null) delete res.slots[k]; else { const p = piece(id); if(p) res.slots[k] = p; } });
@@ -989,6 +999,7 @@ async function pull(){
     const mergeById = (a, b) => { const m = {}; (a||[]).forEach(x=>m[x.id]=x); (b||[]).forEach(x=>{ if(!m[x.id] || (x.updated||0) > (m[x.id].updated||0)) m[x.id]=x; }); return Object.values(m).sort((x,y)=>(y.added||0)-(x.added||0)); };
     S.style.looks = mergeById(out.style.looks, S.style.looks);
     S.style.inspo = mergeById(out.style.inspo, S.style.inspo);
+    S.style.tryons = mergeById(out.style.tryons, S.style.tryons);
     S.style.rules = out.style.rules || S.style.rules || [];
   }
   S.synced = Date.now(); persist();
@@ -1100,7 +1111,8 @@ function viewDay(date, settle){
   <div class="acts">${actions}</div>
   ${o.list.length ? (()=>{ const rt = ratingFor(date); return `<div class="rate" role="group" aria-label="Rate this look"><span class="label">This look</span><button type="button" class="label" data-rate="1" data-date="${date}" aria-pressed="${!!(rt&&rt.y)}">Love it</button><button type="button" class="label" data-rate="0" data-date="${date}" aria-pressed="${!!(rt&&!rt.y)}">Not for me</button></div>`; })() : ''}
   <nav class="strip" aria-label="This week">${strip}</nav>
-  <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">Try it on in ChatGPT</button></div>`:''}</section>
+  <section class="panel"><span class="cap">The look</span>${(()=>{ const lp = o.list.length && lookPicture(o.list.map(x=>x.p.id)); if(!lp) return '';
+      return `<figure class="lookpic"><img src="${lp.src}" alt="${lp.real?'You wearing this look':'ChatGPT try-on of this look'}"><figcaption class="caption">${lp.real ? `You, on ${esc(nice(lp.date))}.` : 'ChatGPT’s try-on. AI changes details, so judge the shape and colours.'}${lp.tr ? ` ${esc(verdictWords(lp.tr))}.` : ''}</figcaption></figure>`; })()}<ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">${worthTrying(o, date) ? 'Worth trying on in ChatGPT' : 'Try it on in ChatGPT'}</button></div>`:''}</section>
   <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>
   ${(()=>{ const sc = o.score || (o.list.length ? lookScore(o.slots, date, {}) : null); if(!sc) return ''; const w = weights();
     return `<section class="panel"><span class="cap">How it scores</span><p class="caption pad">Six things a stylist weighs. The weights shift as you rate looks.</p><ul class="scores">${FACTORS.map(([k,l])=>`<li><span class="t">${l}<small>${Math.round(w[k]*100)}% of the score</small></span><span class="bar" aria-label="${Math.round(sc.f[k]*100)} out of 100"><i style="width:${Math.round(sc.f[k]*100)}%"></i></span>${sc.note[k]?`<span class="s">${esc(sc.note[k])}</span>`:''}</li>`).join('')}</ul></section>`; })()}`;
@@ -1110,7 +1122,7 @@ function dayRowHTML(d, place){
   const o = outfitFor(d), w = wx(d), oc = occasionFor(d);
   const thumbs = o.list.map(({p})=>`<span>${art(p)}</span>`).join('');
   const names = o.list.map(({p})=>p.name).join(', ');
-  return `<li class="${d===TODAY?'today':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':oc.occ==='off'?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${o.list.length?`<div class="rowact"><button type="button" class="linkish" data-act="tryon" data-date="${d}" aria-label="Try on ${esc(dayName(d))}'s look in ChatGPT">Try on</button></div>`:''}</li>`;
+  return `<li class="${d===TODAY?'today':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':oc.occ==='off'?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${o.list.length?`<div class="rowact">${worthTrying(o, d) ? '<span class="worth">Worth trying on</span>' : ''}<button type="button" class="linkish" data-act="tryon" data-date="${d}" aria-label="Try on ${esc(dayName(d))}'s look in ChatGPT">Try on</button></div>`:''}</li>`;
 }
 function tripStripHTML(){
   const t = upcomingTrips()[0]; if(!t) return '';
@@ -1238,7 +1250,7 @@ function viewLog(arg){
     <div class="field"><span class="cap">How did it feel?</span></div>
     <div class="feel" role="group" aria-label="How did it feel">${Object.entries(FEEL).map(([k,l])=>`<button type="button" data-feel="${k}" aria-pressed="${feel===k}">${l}</button>`).join('')}</div>
     <div class="field"><label class="cap" for="lognote">A note for next time</label><textarea id="lognote" rows="2" placeholder="Too warm by lunch. Scarf worked.">${esc(entry&&entry.note||'')}</textarea></div>
-    <div class="field"><span class="cap">Mirror photo</span><div class="photo-in">${entry&&entry.photoPreview?`<img src="${entry.photoPreview}" alt="Mirror photo">`:''}<label class="linkish" for="photo">${entry&&entry.photoPreview?'Replace photo':'Add a photo'}</label><input type="file" id="photo" accept="image/*" class="sr"></div><span class="hint">Optional. Claude can match it to your pieces.</span></div>
+    <div class="field"><span class="cap">Mirror photo</span><div class="photo-in">${entry&&entry.photoPreview?`<img src="${entry.photoPreview}" alt="Mirror photo">`:''}<label class="linkish" for="photo">${entry&&entry.photoPreview?'Replace photo':'Add a photo'}</label><input type="file" id="photo" accept="image/*" class="sr"></div><span class="hint">${!(entry&&entry.photoPreview) && tryonFor([...sel]) ? 'You tried this look on in ChatGPT. Add a photo of the real thing and it takes the render’s place.' : 'Optional. Claude can match it to your pieces.'}</span></div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savelog" data-date="${date}">Save the log</button></div>
   </div>
   ${entry?`<section class="panel"><span class="cap">How did it go?</span><p class="caption pad">React to the look or to a single piece. Two of the same reaction become a rule the app follows.</p><div id="reactions">${reactionsHTML(date)}</div></section>`:''}
@@ -1432,6 +1444,10 @@ function viewStyle(arg){
   <section class="panel"><span class="cap">Inspiration</span><p class="caption pad">Screenshots and links from anywhere. Say what caught your eye.</p>
     ${ins.length?`<ul class="inspo">${ins.map(inspoCard).join('')}</ul>`:''}
     <div class="acts"><a class="btn" href="#style/inspo">Add a picture</a></div></section>
+  <section class="panel"><span class="cap">Try-ons</span><p class="caption pad">ChatGPT renders you saved, with your verdict. When you wear a look and add a mirror photo, the photo replaces the render.</p>
+    ${(()=>{ const ts = liveTryons(); if(!ts.length) return `<p class="caption pad">None yet. Open a day, tap Try it on in ChatGPT, then add the picture you get back.</p>`;
+      return `<ul class="inspo tryons">${ts.map(t=>{ const real = realFor(t.items), src = real ? picOf(real) : picOf(t), ps = (t.items||[]).map(piece).filter(Boolean);
+        return `<li><span class="in-ph"><img src="${src}" alt=""><span class="badge">${real?'Worn':'Render'}</span></span><span class="thumbs">${ps.map(p=>`<span>${art(p)}</span>`).join('')}</span><span class="sub">${esc(verdictWords(t))}${real?` · worn ${esc(nice(real.date))}`:''}</span><button type="button" class="linkish rm" data-act="rmstyle" data-kind="tryons" data-id="${esc(t.id)}">Remove</button></li>`; }).join('')}</ul>`; })()}</section>
   <section class="panel"><span class="cap">Do I already own this?</span><p class="caption pad">Before you buy, snap the piece. The app shows what in your closet looks most like it.</p>
     ${S.ui.own ? (()=>{ const w = wrongFor(S.ui.own.ref), list = (S.ui.own.overall||[]).filter(m=>!w.has(m.id) && piece(m.id)).slice(0,4), top = list[0];
       return `<div class="own pad"><img src="${S.ui.own.preview}" alt="The piece you checked">${S.ui.own.overall ? matchRow(list, S.ui.own.ref, true) : ''}</div>${S.ui.own.overall ? `<p class="caption pad">${top && top.sim>=.9 ? `You own something very like this: the ${esc(piece(top.id).name.toLowerCase())}.` : top && top.sim>=.84 ? 'You have something close. Worth a look before buying.' : 'Nothing very like it in your closet.'}</p>` : ''}`; })() : ''}
@@ -1715,13 +1731,14 @@ async function sheetTryOn(date, given){
   const o = given || outfitFor(date); if(!o.list.length){ toast('Nothing to try on yet'); return; }
   if(S.ui.try && S.ui.try.url) URL.revokeObjectURL(S.ui.try.url);
   const token = Date.now(), name = `wardrobe-look-${String(date).replace(/[^0-9a-z-]/gi,'-')}.jpg`;
-  S.ui.try = {date, token, name, prompt: tryPrompt(o)};
+  S.ui.try = {date, token, name, prompt: tryPrompt(o), items: o.list.map(x=>x.p.id), sc: o.score || lookScore(o.slots, isoDate(date) ? date : TODAY, {}), verdict:null, off:[]};
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Try it on in ChatGPT</span><button type="button" class="linkish" data-close>Done</button></div>
     <ol class="try-steps"><li>Save or copy the image of the outfit.</li><li>Copy the prompt.</li><li>In ChatGPT, attach a full-length photo of you and the image, then paste the prompt.</li></ol>
     <div id="tryimg"><p class="caption pad" style="margin:16px 0 0">Laying the outfit out…</p></div>
     <div class="field try-prompt"><label class="cap" for="tryprompt">Prompt</label><textarea id="tryprompt" rows="9" spellcheck="false">${esc(S.ui.try.prompt)}</textarea><span class="hint">Change the wording if you like. Copy takes whatever is in the box.</span></div>
     <div class="acts"><button type="button" class="btn" data-act="trycopy">Copy prompt</button><a class="btn ghost" href="https://chatgpt.com/" target="_blank" rel="noopener">Open ChatGPT</a></div>
-    <p class="caption pad" style="margin:14px 0 0">Your photo goes to ChatGPT only. This app never sees it. Judge the shape and the colours; AI often changes a collar, a hem or a print, and your face may look off.</p>`);
+    <p class="caption pad" style="margin:14px 0 0">Your photo goes to ChatGPT only. This app never sees it. Judge the shape and the colours; AI often changes a collar, a hem or a print, and your face may look off.</p>
+    <section class="try-result"><div class="field"><span class="cap">Got the picture back?</span></div><p class="caption pad">Save it here with your verdict. The app learns from it, and Claude looks at it on Sunday. Once you wear the look, your own photo takes its place.</p><div id="tryres">${tryResultBlock()}</div></section>`);
   try{
     const {blob, cv} = await collage(o);
     const cur = S.ui.try; if(!cur || cur.token!==token) return;
@@ -1736,6 +1753,65 @@ async function copyText(text){
   const ta = $('#tryprompt'); if(!ta) return false;
   ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
   try{ return document.execCommand('copy'); }catch(e){ return false; }
+}
+
+/* ---------------- try-ons and the real thing ----------------
+   A ChatGPT render of a look, with her verdict. When she wears the look and adds a mirror photo, the photo takes over. */
+const OFF_TAGS = [['colours','The colours'],['proportions','Proportions'],['busy','Too busy'],['plain','Too plain'],['notme','Not me']];
+const isoDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d||'');
+const mainIds = items => (items||[]).map(piece).filter(p=>p && ['top','dress','bottom','outer','shoes'].includes(slotOf(p))).map(p=>p.id);
+// The same look, give or take a coat or a pair of shoes.
+function sameLook(a, b){ const A = new Set(mainIds(a)), B = mainIds(b); if(!A.size || !B.length) return false; const inter = B.filter(x=>A.has(x)).length; return inter / new Set([...A, ...B]).size >= .74; }
+const liveTryons = () => (S.style.tryons||[]).filter(x=>!x.deleted).sort((a,b)=>(b.added||0)-(a.added||0));
+const tryonFor = items => liveTryons().find(t=>sameLook(t.items, items));
+const realFor = items => log().filter(e=>e.source!=='sample' && e.photoPreview && sameLook(e.items, items)).sort((a,b)=>b.date.localeCompare(a.date))[0];
+const picOf = x => { if(x.photo && S.photos[x.photo]) return S.photos[x.photo]; if(x.photo && ghReady()) loadPhoto(x.photo); return x.photoPreview || x.preview; };
+// The best picture of a look: her own photo first, then the render.
+function lookPicture(items){
+  const real = realFor(items), tr = tryonFor(items);
+  if(real) return {src: picOf(real), real:true, date: real.date, tr};
+  if(tr) return {src: picOf(tr), real:false, tr};
+  return null;
+}
+function verdictWords(t){ return t.verdict==='y' ? 'You loved it' : `Not for you${(t.off||[]).length ? ': '+t.off.map(k=>(OFF_TAGS.find(x=>x[0]===k)||[])[1].toLowerCase()).join(', ') : ''}`; }
+// Worth rendering: a look the app is least sure of. A push or rediscover day, or a main piece never worn.
+function worthTrying(o, date){
+  if(!isoDate(date)) return false;
+  const wk = monday(date), memo = S.ui.memo.worth || (S.ui.memo.worth = {});
+  if(!memo[wk]){
+    // Two a week at most: push days first, then rediscover, then looks with a piece never worn.
+    const rank = d => { const x = outfitFor(d); if(!worthBase(x, d)) return 0; return x.mode==='push' ? 3 : x.mode==='rediscover' ? 2 : 1; };
+    memo[wk] = new Set(weekOf(date).filter(d=>d>=TODAY).map(d=>[d, rank(d)]).filter(x=>x[1]).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0])).slice(0,2).map(x=>x[0]));
+  }
+  return memo[wk].has(date);
+}
+function worthBase(o, date){
+  if(!o.list.length || o.logged) return false;
+  const items = o.list.map(x=>x.p.id); if(tryonFor(items) || realFor(items)) return false;
+  const st = stats(date);
+  return o.mode==='push' || o.mode==='rediscover' || o.list.some(({slot,p})=>['top','dress','bottom'].includes(slot) && !(st[p.id] && st[p.id].last));
+}
+function tryResultBlock(){
+  const tr = S.ui.try; if(!tr) return '';
+  const before = tryonFor(tr.items);
+  const prev = before ? `<p class="caption pad">You tried this on before. ${esc(verdictWords(before))}. A new picture is saved alongside it.</p>` : '';
+  if(!tr.res) return `${prev}<div class="acts"><label class="btn" for="tryresult">Add the result</label><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
+  return `<div class="try-res"><img src="${tr.res.preview}" alt="ChatGPT's try-on"></div>
+    <div class="rate" role="group" aria-label="Your verdict"><span class="label">This look</span><button type="button" class="label" data-tryv="1" aria-pressed="${tr.verdict===true}">Love it</button><button type="button" class="label" data-tryv="0" aria-pressed="${tr.verdict===false}">Not for me</button></div>
+    ${tr.verdict===false ? `<div class="field"><span class="cap">What's off?</span></div>${tagChips(OFF_TAGS, tr.off||[], 'data-tryoff')}` : ''}
+    <div class="acts"><button type="button" class="btn" data-act="tryonsave">Save</button><label class="linkish" for="tryresult">Pick another</label><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
+}
+const refreshTry = () => { const el = $('#tryres'); if(el) el.innerHTML = tryResultBlock(); };
+async function saveTryon(){
+  const tr = S.ui.try; if(!tr || !tr.res) return;
+  if(tr.verdict==null){ toast('Love it, or not for you?'); return; }
+  const id = 'try-'+Date.now().toString(36), date = isoDate(tr.date) ? tr.date : TODAY;
+  const x = {id, added:Date.now(), updated:Date.now(), date, items:tr.items, verdict: tr.verdict ? 'y' : 'n', off: tr.verdict ? [] : (tr.off||[]), preview: tr.res.preview, f: tr.sc ? tr.sc.f : null};
+  if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, tr.res.b64, 'A try-on from ChatGPT'); x.photo = path; }catch(err){ toast(err.message); } }
+  S.style.tryons = [x, ...(S.style.tryons||[])];
+  if(tr.sc){ S.style.ratings = (S.style.ratings||[]).concat([{date, items:tr.items, y:tr.verdict, mode:'tryon', src:'tryon', ref:id, f:tr.sc.f, at:Date.now()}]); learnFrom(tr.sc, tr.verdict, 0.04); }
+  if(tr.verdict) pinLook(date, tr.items);
+  queuePush({style:true}); closeSheet(); render(); toast(tr.verdict ? 'Saved. More like this.' : 'Saved. Claude will look at it on Sunday.');
 }
 
 /* ---------------- actions ---------------- */
@@ -1810,6 +1886,8 @@ document.addEventListener('click', async e=>{
     if(SHAPE[k].multi){ if(on && sib.filter(b=>b.getAttribute('aria-pressed')==='true').length>=2){ toast('Two at most'); return; } t.setAttribute('aria-pressed', on); }
     else { sib.forEach(b=>b.setAttribute('aria-pressed', 'false')); t.setAttribute('aria-pressed', on); }
     return; }
+  if(t.dataset.tryv!==undefined && S.ui.try){ const v = t.dataset.tryv==='1'; S.ui.try.verdict = S.ui.try.verdict===v ? null : v; refreshTry(); return; }
+  if(t.dataset.tryoff && S.ui.try){ const k = t.dataset.tryoff, a = S.ui.try.off||[]; S.ui.try.off = a.includes(k) ? a.filter(x=>x!==k) : [...a, k]; refreshTry(); return; }
   if(t.dataset.love){ toggleLove(t.dataset.love); return; }
   if(t.dataset.vfb){ const ok = tapMatch(t.dataset.ref, t.dataset.id, t.dataset.vfb==='1', t.dataset.region); render(); toast(ok===true ? 'Right. It will find this one more easily.' : ok===false ? "Got it. It won't suggest that here, or for pictures like it." : 'Cleared'); return; }
   if(t.dataset.mode){ S.state.modes[t.dataset.date] = t.dataset.mode; delete S.state.swaps[t.dataset.date]; queuePush({state:true}); render(); toast(MODES[t.dataset.mode]); return; }
@@ -1841,6 +1919,7 @@ document.addEventListener('click', async e=>{
     if(t.dataset.inspo){ const [wk,i] = t.dataset.inspo.split('|'), o = weekInspo(wk)[+i]; if(o) sheetTryOn(`office-look-${+i+1}`, o); return; }
     sheetTryOn(t.dataset.date); return;
   }
+  if(act==='tryonsave'){ await saveTryon(); return; }
   if(act==='trycopy'){ const ta = $('#tryprompt'); toast(await copyText(ta ? ta.value : (S.ui.try||{}).prompt || '') ? 'Prompt copied' : 'Press and hold the text to copy it'); return; }
   if(act==='tryimgcopy'){
     const tr = S.ui.try; if(!tr || !tr.cv) return;
@@ -1870,7 +1949,10 @@ document.addEventListener('click', async e=>{
     const fb = document.querySelector('[data-feel][aria-pressed="true"]');
     const patch = {items, source:'tick', feel: fb ? fb.dataset.feel : null, note: ($('#lognote')||{}).value || ''};
     if(S.ui.photo){ patch.photoPreview = S.ui.photo.preview; if(ghReady()){ const path = `data/inbox/mirror-${d}-${Date.now()}.jpg`; try{ await ghPutRaw(path, S.ui.photo.b64, `Mirror photo ${d}`); patch.photo = path; }catch(err){ toast(err.message); } } S.ui.photo = null; }
-    upsertLog(d, patch); S.state.logExtra = ''; queuePush({log:true}); render(); toast('Saved');
+    upsertLog(d, patch); S.state.logExtra = '';
+    const tro = patch.photoPreview && tryonFor(items);
+    if(tro){ tro.wornOn = d; tro.updated = Date.now(); queuePush({style:true}); }
+    queuePush({log:true}); render(); toast(tro ? 'Saved. Your photo now replaces the try-on.' : 'Saved');
   }
   else if(act==='savepiece'){
     const p = piece(t.dataset.id); if(!p) return;
@@ -1964,6 +2046,7 @@ document.addEventListener('change', async e=>{
   if(el.dataset.pack){ togglePack(el.dataset.trip, el.dataset.pack, el.checked); return; }
   if(el.dataset.lookpick && S.ui.look){ const d = S.ui.look, id = el.dataset.lookpick; d.items = el.checked ? [...new Set([...d.items, id])] : d.items.filter(x=>x!==id); render(); return; }
   if(el.id==='plove'){ toggleLove(el.dataset.id); return; }
+  if(el.id==='tryresult' && el.files[0] && S.ui.try){ const ph = await readPhoto(el.files[0]); if(!ph){ toast("That picture couldn't be read."); return; } S.ui.try.res = ph; refreshTry(); return; }
   if(el.id==='ownphoto' && el.files[0]){
     const f = el.files[0], ph = await readPhoto(f); if(!ph){ toast("That photo couldn't be read."); return; }
     const vid = 'v-'+Date.now().toString(36); S.ui.own = {preview: ph.preview, ref: vid}; render();
