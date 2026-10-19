@@ -442,6 +442,12 @@ function buildOne(date, opts){
     if(!has('bottom')){ const x = pick('bottom','bottom',chosen); if(x){slots.bottom=x;chosen.push(x);} }
   }
   if(!has('outer') && (t < 17 || o==='customer')){ const x = pick('outer','outer',chosen); if(x){slots.outer=x;chosen.push(x);} }
+  // A t-shirt under a blazer or cardigan; a plain tee under a cashmere jumper.
+  if(needsTeeUnder(slots.outer) && slots.top && !layerTee(slots.top) && !isCashmere(slots.top) && slots.top!==hero){
+    const rest = chosen.filter(c=>c!==slots.top), x = pick('top','top',rest,layerTee);
+    if(x){ chosen.splice(chosen.indexOf(slots.top),1,x); slots.top = x; }
+  }
+  if(isCashmere(slots.top)){ const x = pick('top','under',chosen,p=>layerTee(p) && (!p.pattern || p.pattern==='none')); if(x){ slots.under = x; chosen.push(x); } }
   if(!has('shoes')){ const x = pick('shoes','shoes',chosen); if(x){slots.shoes=x;chosen.push(x);} }
   if(!has('accessory') && (o==='customer' || need>=4)){ const x = pick('accessory','accessory',chosen); if(x && (o==='customer' || warmthOf(x)>=3)){slots.accessory=x;chosen.push(x);} }
   // A belt when the bottom has loops. Without loops, a long scarf takes the accent slot.
@@ -453,7 +459,19 @@ function buildOne(date, opts){
   if(!slots.bag && (o==='off' || settings.bagsOffice || scope)){ const x = pick('bag','bag',chosen); if(x){ slots.bag = x; chosen.push(x); } }
   return {slots, hero, temp:t, need, occ:o, scope:!!scope};
 }
-const SLOT_ORDER = ['outer','top','dress','bottom','belt','shoes','accessory','bag'];
+const SLOT_ORDER = ['outer','top','under','dress','bottom','belt','shoes','accessory','bag'];
+// Natalia always wears a t-shirt, short or long sleeved, under blazers, cardigans and cashmere jumpers.
+const layerTee = p => !!p && p.cat==='top' && ((p.shape==='tee' && !/vest|cami|halter|one-shoulder|waistcoat|satin|tie-front|blouse/i.test(p.name)) || /cotton turtleneck|long-sleeve/i.test(p.name));
+const needsTeeUnder = p => !!p && p.cat==='outer' && (p.shape==='blazer' || p.shape==='jumper');
+const isCashmere = p => !!p && p.cat==='top' && /cashmere/i.test((p.composition||'')+' '+(p.name||''));
+// Put a list of pieces into slots. A second top that is a plain tee goes underneath.
+function slotsFrom(ids){
+  const slots = {};
+  (ids||[]).map(piece).filter(Boolean).forEach(p=>{ const k = slotOf(p);
+    if(k==='top' && slots.top){ if(layerTee(p) && !layerTee(slots.top)) slots.under = p; else if(layerTee(slots.top)){ slots.under = slots.top; slots.top = p; } else slots.top = p; }
+    else slots[k] = p; });
+  return slots;
+}
 /* ---------------- look scoring: six factors, learned weights, three modes ----------------
    Each candidate look gets a 0–1 score per factor. The weights start from a stylist's guess and move with
    Natalia's ratings. Same colour head to toe is not the same as a coherent look, so matching alone never scores top. */
@@ -615,7 +633,7 @@ function rateLook(date, y){
 // Keep a loved look on its day, so the learning it triggers can't swap it for another.
 function pinLook(date, items){
   if(!isoDate(date)) return;
-  const sw = {}; SLOT_ORDER.forEach(k=>sw[k]=null); (items||[]).map(piece).filter(Boolean).forEach(p=>sw[slotOf(p)] = p.id);
+  const sw = {}; SLOT_ORDER.forEach(k=>sw[k]=null); Object.entries(slotsFrom(items)).forEach(([k,p])=>sw[k] = p.id);
   S.state.swaps[date] = sw; queuePush({state:true});
 }
 function learnFrom(sc, y, lr){
@@ -657,7 +675,7 @@ function outfitFor(date){
   const pd = !trip && S.plan && S.plan.days && S.plan.days.find(d=>d.date===date);
   const worn = log().find(e=>e.date===date && e.source!=='sample');
   if(worn && worn.items && worn.items.length){
-    const slots = {}; worn.items.map(piece).filter(Boolean).forEach(p=>{ slots[slotOf(p)] = p; });
+    const slots = slotsFrom(worn.items);
     const w = wx(date), t = w ? w.feel : 12, st = stats(date);
     const hero = Object.values(slots).filter(p=>{ const l = st[p.id] && st[p.id].last; return !l || daysBetween(l,date)>=45; })[0] || null;
     res = {slots, hero, temp:t, need:band(t), occ:occasionFor(date).occ, why: worn.why};
@@ -670,8 +688,7 @@ function outfitFor(date){
     res = Object.assign({}, m, {slots:Object.assign({}, m.slots)});
   } else if(pd && pd.outfit && pd.outfit.length){
     fromPlan = true;
-    const slots = {};
-    pd.outfit.map(piece).filter(Boolean).forEach(p=>{ slots[slotOf(p)] = p; });
+    const slots = slotsFrom(pd.outfit);
     const w = wx(date), t = w ? w.feel : (pd.tempAssumed ?? 12);
     res = {slots, hero: pd.hero ? piece(pd.hero) : null, temp:t, need:band(t), occ:occasionFor(date).occ, why: pd.why};
     if(pd.tempAssumed!=null && w && band(t) !== band(pd.tempAssumed)){
@@ -1052,10 +1069,10 @@ function masthead(back){
 }
 // where each kind of piece sits on the spread, in % of the hero
 const LAYOUT = {
-  outer:{x:31,y:29,w:50,z:1}, bottom:{x:47,y:49,w:30,z:2}, top:{x:11,y:41,w:36,z:3}, dress:{x:13,y:37,w:33,z:3}, shoes:{x:22,y:83,w:27,z:4}, accessory:{x:40,y:33,w:9,z:5},
+  outer:{x:31,y:29,w:50,z:1}, bottom:{x:47,y:49,w:30,z:2}, top:{x:11,y:41,w:36,z:3}, under:{x:2,y:58,w:24,z:2}, dress:{x:13,y:37,w:33,z:3}, shoes:{x:22,y:83,w:27,z:4}, accessory:{x:40,y:33,w:9,z:5},
   belt:{x:62,y:49,w:15,z:4}, bag:{x:72,y:66,w:22,z:4}
 };
-const LAYOUT_NO_OUTER = {top:{x:20,y:30,w:44,z:3}, dress:{x:24,y:27,w:38,z:3}, bottom:{x:50,y:46,w:32,z:2}, shoes:{x:10,y:85,w:28,z:4}, accessory:{x:68,y:28,w:11,z:5},
+const LAYOUT_NO_OUTER = {top:{x:20,y:30,w:44,z:3}, under:{x:4,y:52,w:26,z:2}, dress:{x:24,y:27,w:38,z:3}, bottom:{x:50,y:46,w:32,z:2}, shoes:{x:10,y:85,w:28,z:4}, accessory:{x:68,y:28,w:11,z:5},
   belt:{x:66,y:46,w:15,z:4}, bag:{x:68,y:64,w:24,z:4}};
 const REPEAT_ICON = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="square" aria-hidden="true"><path d="M3.5 8.5V7a2.5 2.5 0 0 1 2.5-2.5h10"/><path d="M13.5 2.2 16.2 4.5 13.5 6.8"/><path d="M16.5 11.5V13a2.5 2.5 0 0 1-2.5 2.5H4"/><path d="M6.5 13.2 3.8 15.5 6.5 17.8"/></svg>';
 function repeatBtn(id){
@@ -1651,12 +1668,12 @@ function sheetSwap(date){
   if(!S.ui.swapSlot || !slots.includes(S.ui.swapSlot)) S.ui.swapSlot = slots[0];
   const slot = S.ui.swapSlot, cur = o.slots[slot];
   const st = stats();
-  const opts = closet().filter(p=>slotOf(p)===slot && usable(p, !!scope) && (!scope || scope.has(p.id))).sort((a,b)=>(st[a.id].last||'').localeCompare(st[b.id].last||''));
-  const label = {outer:'Outer',top:'Top',dress:'Dress',bottom:'Bottom',belt:'Belt',shoes:'Shoes',accessory:'Extra',bag:'Bag'};
+  const opts = closet().filter(p=>(slot==='under' ? layerTee(p) : slotOf(p)===slot) && usable(p, !!scope) && (!scope || scope.has(p.id))).sort((a,b)=>(st[a.id].last||'').localeCompare(st[b.id].last||''));
+  const label = {outer:'Outer',top:'Top',under:'Under',dress:'Dress',bottom:'Bottom',belt:'Belt',shoes:'Shoes',accessory:'Extra',bag:'Bag'};
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Swap a piece</span><button type="button" class="linkish" data-close>Done</button></div>
     <div class="segs" role="tablist">${slots.map(k=>`<button type="button" class="label" role="tab" data-swapslot="${k}" aria-pressed="${k===slot}">${label[k]}</button>`).join('')}</div>
     <ul class="swaps">${opts.map(p=>`<li class="${cur&&cur.id===p.id?'cur':''}"><button type="button" data-swapto="${esc(p.id)}" data-slot="${slot}" data-date="${date}"><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(sinceWords(st[p.id].last))} · ${esc(fabricOf(p).name)}</span></span></button></li>`).join('')}
-    ${['accessory','outer','belt','bag'].includes(slot)?`<li><button type="button" data-swapto="" data-slot="${slot}" data-date="${date}"><span class="th"></span><span><span class="nm">Without</span><span class="sub">Leave the ${slot==='outer'?'coat':slot==='belt'?'belt':slot==='bag'?'bag':'extra'} off</span></span></button></li>`:''}</ul>`);
+    ${['accessory','outer','belt','bag','under'].includes(slot)?`<li><button type="button" data-swapto="" data-slot="${slot}" data-date="${date}"><span class="th"></span><span><span class="nm">Without</span><span class="sub">Leave the ${slot==='outer'?'coat':slot==='belt'?'belt':slot==='bag'?'bag':slot==='under'?'t-shirt underneath':'extra'} off</span></span></button></li>`:''}</ul>`);
 }
 function sheetReact(date, id){
   const entry = log().find(e=>e.date===date && e.source!=='sample'); if(!entry) return;
@@ -1702,7 +1719,7 @@ async function collage(o){
     if(!im) im = await loadImg(drawnURL(p));
     return {slot, im};
   }));
-  const BIG = ['outer','top','dress','bottom'];
+  const BIG = ['outer','top','under','dress','bottom'];
   const big = items.filter(x=>BIG.includes(x.slot)), small = items.filter(x=>!BIG.includes(x.slot));
   const bw = (W-2*M-G)/2, bh = 560, sw = (W-2*M-2*G)/3, sh = 330;
   const bigRows = Math.ceil(big.length/2), smallRows = Math.ceil(small.length/3);
