@@ -2298,6 +2298,15 @@ async function boot(){
   render();
   upcomingTrips().forEach(ensureTripWeather);
 }
-if('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+if('serviceWorker' in navigator && location.protocol==='https:'){
+  // A new release takes over on its own: check for one whenever the app comes back to the front, and reload once it has, unless you are mid-edit.
+  const had = !!navigator.serviceWorker.controller; let reloaded = false;
+  navigator.serviceWorker.register('sw.js').then(reg=>{ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) reg.update().catch(()=>{}); }); }).catch(()=>{});
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if(!had || reloaded) return;
+    const a = document.activeElement, busy = (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || document.querySelector('.sheet.open');
+    if(busy) return; reloaded = true; location.reload();
+  });
+}
 boot();
 })();
