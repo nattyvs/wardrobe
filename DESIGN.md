@@ -13,7 +13,7 @@ colors:
 typography:
   display:
     fontFamily: "\"W Didot\", Didot, \"Bodoni 72\", \"Bodoni MT\", serif"
-    fontSize: "clamp(100px, 35vw, 140px)"
+    fontSize: "clamp(92px, 31vw, 128px)"
     fontWeight: 400
     lineHeight: 0.86
     letterSpacing: "-0.04em"
@@ -157,7 +157,7 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 **Character:** A fashion-magazine Didot for anything that is read as editorial (day names, piece names, reasons, temperatures, numbers) against a clean geometric Jost for anything that is operated or measured (buttons, tabs, tags, captions, compositions).
 
 ### Hierarchy
-- **Display** (Didot 400, clamp(100px, 35vw, 140px), line-height 0.86, -0.04em, wine ink): The day name on Today, deliberately cropped off the left edge. One per screen.
+- **Display** (Didot 400, clamp(92px, 31vw, 128px), line-height 0.86, -0.04em, wine ink): The day name on Today, set on the left gutter with its serif fully visible, never cropped. One per screen.
 - **Headline** (Didot 400, 44px, line-height 1, 0.06em, uppercase): Page titles on Week, Closet, Log and Settings.
 - **Numerals** (Didot 400, 40 to 46px): The temperature on Today (46px) and day names in the Week list (40px, -0.03em). Tabular numerals in the week strip (19px).
 - **Title** (Didot 400, 19 to 20px, line-height 1.25 to 1.3): The one-sentence reason, page ledes, plan notes. Editorial sentences, max about 30ch.
