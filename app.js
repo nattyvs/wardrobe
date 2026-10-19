@@ -210,7 +210,9 @@ function fabricOf(p){
 function art(p){
   if(!p) return '';
   if(p.photo && S.photos[p.photo]) return `<img src="${S.photos[p.photo]}" alt="${esc(p.name)}">`;
-  if(p.photo && settings.token && !settings.sample) loadPhoto(p.photo);
+  if(p.photo && settings.token && !settings.sample){ loadPhoto(p.photo);
+    // Marked so the photo can take the drawing's place when it arrives, even inside an open sheet.
+    return window.garmentSVG(p.shape||'tee', p.hex||'#999', p.name).replace('<svg', `<svg data-ph="${esc(p.photo)}" data-alt="${esc(p.name)}"`); }
   return window.garmentSVG(p.shape||'tee', p.hex||'#999', p.name);
 }
 
@@ -995,6 +997,7 @@ async function loadPhoto(path){
     const r = await fetch(ghURL(path), {headers:ghHeaders({Accept:'application/vnd.github.raw'})});
     if(!r.ok) throw 0;
     S.photos[path] = URL.createObjectURL(await r.blob());
+    document.querySelectorAll('#sheet svg[data-ph]').forEach(el=>{ if(el.getAttribute('data-ph')!==path) return; const im = document.createElement('img'); im.src = S.photos[path]; im.alt = el.getAttribute('data-alt')||''; el.replaceWith(im); });
     render();
   }catch(e){} finally{ delete loadPhoto.busy[path]; }
 }
