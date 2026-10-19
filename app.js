@@ -327,7 +327,15 @@ function beltWant(b, need){
 }
 function beltFrom(belts, want){ return belts.find(x=>(x.colour||'').toLowerCase()===want) || belts[0] || null; }
 const PATTERN = /print|floral|stripe|check|leopard|paisley|brush|graphic|dot|polka|gingham|animal|tweed/i;
-const patterned = p => /\band\b/.test(p.colour||'') || PATTERN.test(p.name||'');
+const patterned = p => p.pattern ? p.pattern!=='none' : (/\band\b/.test(p.colour||'') || PATTERN.test(p.name||''));
+// Two prints only work when one is small and they share a colour. Anything else is a clash, whatever else the look has going for it.
+const PSCALE = {small:1, medium:2, large:3};
+function printClash(prints){
+  if(prints.length>=3) return true;
+  if(prints.length<2) return false;
+  const [a,b] = prints, sa = PSCALE[a.pattern]||2, sb = PSCALE[b.pattern]||2;
+  return !(Math.min(sa,sb)===1 && sa!==sb && hueClose(a,b));
+}
 function compatible(a,b){
   if(patterned(a) && patterned(b)) return false;
   const an = NEUTRAL.test(a.colour||''), bn = NEUTRAL.test(b.colour||'');
@@ -403,7 +411,7 @@ function buildOne(date, opts){
       const accent = chosen.find(c=>!NEUTRAL.test(c.colour||''));
       if(accent && !NEUTRAL.test(p.colour||'')) s -= hueClose(accent, p) ? 0.4 : 2;
       // One pattern per look, and a full bottom wants a cleaner top and a slimmer outer.
-      if(patterned(p) && chosen.some(patterned)) s -= 2.5;
+      if(patterned(p) && chosen.some(patterned)) s -= printClash([p, ...chosen.filter(patterned)]) ? 8 : 1.5;
       chosen.forEach(c => { s -= proportionClash(c, p); });
       if(chosen.some(c=>pairAvoid(c.id, p.id))) s -= 50;
       if(chosen.some(c=>pairLoved(c.id, p.id))) s += 1.2; // worn together in a look she loved
@@ -516,9 +524,9 @@ function lookScore(slots, date, opts){
   const fabrics = new Set(clothes.map(p=>fabricOf(p).name).filter(Boolean));
   if(!prints.length){ f.texture = fabrics.size>=2 ? .8 : .55; note.texture = fabrics.size>=2 ? `No print; ${[...fabrics].slice(0,2).join(' against ').toLowerCase()} gives it texture.` : 'Plain and one texture.'; }
   else if(prints.length===1){ f.texture = .9; note.texture = `The ${prints[0].name.toLowerCase()} is the one print.`; }
-  else if(prints.length===2 && big<=1 && hueClose(prints[0], prints[1])){ f.texture = .7; note.texture = 'Two prints of different scale sharing a colour.'; }
-  else if(big>=2){ f.texture = .15; note.texture = 'Two bold prints fighting.'; }
-  else { f.texture = .4; note.texture = 'Two prints.'; }
+  else if(!printClash(prints)){ f.texture = .75; note.texture = 'A small print with a bigger one, sharing a colour.'; }
+  else { f.texture = 0; note.texture = prints.length>=3 ? 'Too many prints.' : `The ${prints[0].name.toLowerCase()} and the ${prints[1].name.toLowerCase()} fight each other.`; }
+  const clash = printClash(prints);
   // Preference: what she loves, rates and has worn together happily.
   const rp = ratedPairs(); let pref = .5, pn = '';
   const lovedN = clothes.filter(p=>loved(p.id)).length; pref += Math.min(.3, lovedN*.15); if(lovedN) pn = `${lovedN} piece${lovedN>1?'s':''} you love.`;
@@ -534,8 +542,9 @@ function lookScore(slots, date, opts){
   f.rotation = hasHistory() ? clothes.reduce((a,p)=>a + (ago(p)===999 ? 1 : Math.min(ago(p),90)/90), 0)/Math.max(1, clothes.length) : .5;
   note.rotation = '';
   const w = weights(); if(opts.mode==='reliable'){ w.rotation *= .5; }
-  const total = FACTORS.reduce((a,[k])=>a + w[k]*f[k], 0);
-  return {f, note, total};
+  let total = FACTORS.reduce((a,[k])=>a + w[k]*f[k], 0);
+  if(clash) total *= .4; // a print clash sinks the look, it isn't just one factor among six
+  return {f, note, total, clash};
 }
 function lookKey(slots){ return SLOT_ORDER.map(k=>slots[k] ? slots[k].id : '').join('|'); }
 function noveltyOf(slots){
@@ -557,6 +566,10 @@ function buildOutfit(date, opts){
   const first = best(cands), main = ['top','dress','bottom','outer','shoes'].map(k=>first.slots[k]).filter(Boolean);
   main.forEach((m,i)=>{ for(let j=0;j<2;j++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed:'x'+i+j, exclude:new Set([m.id])}))); });
   if(main.length>=2) for(let j=0;j<3;j++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed:'y'+j, exclude:new Set(main.slice(0,3).map(p=>p.id))})));
+  // And always some looks with at most one print, so a clash never wins for want of an alternative.
+  const printed = closet().filter(patterned);
+  for(let j=0;j<3;j++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed:'p'+j, exclude:new Set(printed.filter(p=>['bottom','dress','shoes','outer'].includes(slotOf(p))).map(p=>p.id))})));
+  for(let j=0;j<3;j++) add(buildOne(date, Object.assign({}, opts, {noHero:true, seed:'q'+j, exclude:new Set(printed.filter(p=>['top','outer','shoes'].includes(slotOf(p))).map(p=>p.id))})));
   let pick = best(cands), fallback = '';
   if(mode==='rediscover'){
     // Start from what's been out least (or, before there's history, what isn't loved or on repeat) and only keep it if the look holds up.
@@ -575,7 +588,7 @@ function buildOutfit(date, opts){
     const safeKey = lookKey(pick.slots);
     const safeIds = new Set(SLOT_ORDER.map(k=>pick.slots[k]).filter(Boolean).map(p=>p.id));
     const differs = c => ['top','dress','bottom','outer','shoes'].filter(k=>c.slots[k] && !safeIds.has(c.slots[k].id)).length >= 2;
-    const ok = cands.filter(c=>lookKey(c.slots)!==safeKey && differs(c) && c.score.total>=floor && c.score.f.silhouette>=.5 && c.score.f.colour>=.5);
+    const ok = cands.filter(c=>!c.score.clash && lookKey(c.slots)!==safeKey && differs(c) && c.score.total>=floor && c.score.f.silhouette>=.5 && c.score.f.colour>=.5);
     pick = ok.sort((a,b)=>(noveltyOf(b.slots)*.6+b.score.total)-(noveltyOf(a.slots)*.6+a.score.total))[0] || pick;
   }
   pick.mode = mode; pick.fallback = fallback;
