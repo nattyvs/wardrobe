@@ -352,7 +352,7 @@ function masthead(){
 }
 // where each kind of piece sits on the spread, in % of the hero
 const LAYOUT = {
-  outer:{x:36,y:31,w:46,z:1}, bottom:{x:54,y:50,w:28,z:2}, top:{x:7,y:42,w:36,z:3}, dress:{x:9,y:38,w:33,z:3}, shoes:{x:52,y:85,w:28,z:4}, accessory:{x:30,y:37,w:10,z:5}
+  outer:{x:31,y:29,w:50,z:1}, bottom:{x:47,y:49,w:30,z:2}, top:{x:11,y:41,w:36,z:3}, dress:{x:13,y:37,w:33,z:3}, shoes:{x:22,y:83,w:27,z:4}, accessory:{x:40,y:33,w:9,z:5}
 };
 const LAYOUT_NO_OUTER = {top:{x:20,y:30,w:44,z:3}, dress:{x:24,y:27,w:38,z:3}, bottom:{x:50,y:46,w:32,z:2}, shoes:{x:10,y:85,w:28,z:4}, accessory:{x:68,y:28,w:11,z:5}};
 function viewDay(date, settle){
@@ -372,10 +372,11 @@ function viewDay(date, settle){
     const sub = fresh ? sinceWords(s && s.last) : [p.brand, p.composition || f.name].filter(Boolean).join(' · ');
     return `<li class="${fresh?'fresh':''}"><span class="n">${nums[p.id]}</span><span class="fl">${art(p)}</span><button type="button" data-piece="${esc(p.id)}"><span class="t">${esc(p.name)}</span><span class="s">${esc(sub)}</span></button></li>`;
   }).join('');
-  const fabrics = []; const seen = {};
-  o.list.forEach(({p})=>{ const f = fabricOf(p); if(seen[f.name]) return; seen[f.name]=1; const sw = p.swatch && S.photos[p.swatch] ? `background-image:url(${S.photos[p.swatch]})` : `background-color:${esc(p.hex||'#999')}`; if(p.swatch && !S.photos[p.swatch] && ghReady()) loadPhoto(p.swatch); fabrics.push(`<div class="fabric"><div class="sw" style="${sw}" role="img" aria-label="${esc(f.name)}, ${esc(p.colour||'')}"></div><span class="t">${esc(f.name)}</span><span class="s">${esc(f.note)}</span></div>`); });
-  const pal = []; const pseen = {};
-  o.list.forEach(({p})=>{ const c = (p.colour||'').toLowerCase(); if(!c||pseen[c]) return; pseen[c]=1; pal.push(`<li><i style="background:${esc(p.hex)}"></i>${esc(c)}</li>`); });
+  const cf = []; const cseen = {};
+  o.list.forEach(({p})=>{ const f = fabricOf(p); const k = (p.colour||'')+'|'+f.name; if(cseen[k]) return; cseen[k]=1;
+    const sw = p.swatch && S.photos[p.swatch] ? `background-image:url(${S.photos[p.swatch]})` : `background-color:${esc(p.hex||'#999')}`;
+    if(p.swatch && !S.photos[p.swatch] && ghReady()) loadPhoto(p.swatch);
+    cf.push(`<li><i style="${sw}" role="img" aria-label="${esc((p.colour||'')+' '+f.name)}"></i><span><span class="t">${esc(p.colour||'')} · ${esc(f.name)}</span><span class="s">${esc(f.note)}</span></span></li>`); });
   const strip = weekOf(date).map(d=>{ const ww = wx(d), oc = occasionFor(d).occ; return `<a href="#day/${d}" class="${d===date?'on':''}" aria-label="${dayName(d)} ${nice(d)}"><span class="label">${dayShort(d)}</span><b>${ww?ww.feel+'°':'·'}</b><i class="${oc==='customer'?'':'no'}"></i></a>`; }).join('');
   const tagCls = occ.occ==='customer' ? 'customer' : occ.occ==='off' ? 'off' : '';
   const actions = isToday
@@ -397,8 +398,7 @@ function viewDay(date, settle){
   <div class="acts">${actions}</div>
   <nav class="strip" aria-label="This week">${strip}</nav>
   <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol></section>
-  <section class="panel"><span class="cap">Fabric story</span><div class="fabrics">${fabrics.join('')}</div></section>
-  <section class="panel"><span class="cap">Colour palette</span><ul class="palette">${pal.join('')}</ul></section>`;
+  <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>`;
 }
 
 function viewWeek(){
@@ -438,7 +438,7 @@ function viewCloset(filter){
   const lede = `${all.length} pieces.${top&&frac?` ${cap1(top[0])} does ${frac} of the work.`:''}${rareN?` <em>${rareN} haven't been worn in two months.</em>`:''}`;
   const item = p => { const s = st[p.id]; const fresh = !p.dontWear && (!s.last || daysBetween(s.last, TODAY)>=60);
     const line = p.dontWear ? 'Set aside' : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : 'Never worn';
-    return `<button type="button" class="item${p.dontWear?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name)}</span><span class="st${fresh?' fresh':''}">${esc(line)}</span></button>`; };
+    return `<button type="button" class="item${p.dontWear?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span><span class="st${fresh?' fresh':''}">${esc(line)}</span></button>`; };
   let body = '';
   const list = all.filter(F[filter].f);
   if(filter==='doubles'){
