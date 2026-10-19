@@ -221,7 +221,7 @@ const STATUS_TAP = {available:'Available', wash:'Wash', drycleaner:'Dry cleaner'
 const statusOf = p => STATUS[p.status] ? p.status : 'available';
 // At home only available pieces are suggested. On a trip, pieces marked "away" are the ones in the suitcase, so they count too.
 const usable = (p, away) => !p.dontWear && (statusOf(p)==='available' || (away && statusOf(p)==='trip'));
-const slotOf = p => p.cat==='accessory' ? (p.shape==='belt' ? 'belt' : 'accessory') : p.cat;
+const slotOf = p => p.cat==='accessory' ? (p.shape==='belt' ? 'belt' : p.shape==='strap' ? 'strap' : 'accessory') : p.cat;
 function onRepeatSince(id, date){
   const d = S.state.onRepeat[id]; if(!d) return null;
   const n = daysBetween(d, date || TODAY);
@@ -458,9 +458,16 @@ function buildOne(date, opts){
   if(slots.bottom && !loops && !slots.accessory && need>=2){ const x = pick('accessory','accessory',chosen,longScarf); if(x){ slots.accessory = x; chosen.push(x); } }
   // Bags: day-off looks by default, office days if the setting is on, and always in a suitcase.
   if(!slots.bag && (o==='off' || settings.bagsOffice || scope)){ const x = pick('bag','bag',chosen); if(x){ slots.bag = x; chosen.push(x); } }
+  // A clip-on strap swaps the bag's own strap when it adds the look's one accent: no other print, and a colour that belongs.
+  if(slots.bag && !slots.strap){
+    const x = pick('strap','strap',chosen.filter(c=>c!==slots.bag), s=>(s.fits||[]).includes(slots.bag.id));
+    const clothes = chosen.filter(c=>!['bag','belt'].includes(slotOf(c)));
+    const accent = clothes.find(c=>!NEUTRAL.test(c.colour||''));
+    if(x && !clothes.some(patterned) && (!accent || hueClose(accent, x))){ slots.strap = x; chosen.push(x); }
+  }
   return {slots, hero, temp:t, need, occ:o, scope:!!scope};
 }
-const SLOT_ORDER = ['outer','top','under','dress','bottom','belt','shoes','accessory','bag'];
+const SLOT_ORDER = ['outer','top','under','dress','bottom','belt','shoes','accessory','bag','strap'];
 // Natalia always wears a t-shirt, short or long sleeved, under blazers, cardigans and cashmere jumpers.
 const layerTee = p => !!p && p.cat==='top' && ((p.shape==='tee' && !/vest|cami|halter|one-shoulder|waistcoat|satin|tie-front|blouse/i.test(p.name)) || /cotton turtleneck|long-sleeve/i.test(p.name));
 const needsTeeUnder = p => !!p && p.cat==='outer' && (p.shape==='blazer' || p.shape==='jumper');
@@ -1077,10 +1084,10 @@ function masthead(back){
 // where each kind of piece sits on the spread, in % of the hero
 const LAYOUT = {
   outer:{x:31,y:29,w:50,z:1}, bottom:{x:47,y:49,w:30,z:2}, top:{x:11,y:41,w:36,z:3}, under:{x:2,y:58,w:24,z:2}, dress:{x:13,y:37,w:33,z:3}, shoes:{x:22,y:83,w:27,z:4}, accessory:{x:40,y:33,w:9,z:5},
-  belt:{x:62,y:49,w:15,z:4}, bag:{x:72,y:66,w:22,z:4}
+  belt:{x:62,y:49,w:15,z:4}, bag:{x:72,y:66,w:22,z:4}, strap:{x:74,y:84,w:18,z:5}
 };
 const LAYOUT_NO_OUTER = {top:{x:20,y:30,w:44,z:3}, under:{x:4,y:52,w:26,z:2}, dress:{x:24,y:27,w:38,z:3}, bottom:{x:50,y:46,w:32,z:2}, shoes:{x:10,y:85,w:28,z:4}, accessory:{x:68,y:28,w:11,z:5},
-  belt:{x:66,y:46,w:15,z:4}, bag:{x:68,y:64,w:24,z:4}};
+  belt:{x:66,y:46,w:15,z:4}, bag:{x:68,y:64,w:24,z:4}, strap:{x:70,y:84,w:20,z:5}};
 const REPEAT_ICON = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="square" aria-hidden="true"><path d="M3.5 8.5V7a2.5 2.5 0 0 1 2.5-2.5h10"/><path d="M13.5 2.2 16.2 4.5 13.5 6.8"/><path d="M16.5 11.5V13a2.5 2.5 0 0 1-2.5 2.5H4"/><path d="M6.5 13.2 3.8 15.5 6.5 17.8"/></svg>';
 function repeatBtn(id){
   const on = !!onRepeatSince(id);
@@ -1825,11 +1832,11 @@ function sheetSwap(date){
   const slot = S.ui.swapSlot, cur = o.slots[slot];
   const st = stats();
   const opts = closet().filter(p=>(slot==='under' ? layerTee(p) : slotOf(p)===slot) && usable(p, !!scope) && (!scope || scope.has(p.id))).sort((a,b)=>(st[a.id].last||'').localeCompare(st[b.id].last||''));
-  const label = {outer:'Outer',top:'Top',under:'Under',dress:'Dress',bottom:'Bottom',belt:'Belt',shoes:'Shoes',accessory:'Extra',bag:'Bag'};
+  const label = {outer:'Outer',top:'Top',under:'Under',dress:'Dress',bottom:'Bottom',belt:'Belt',shoes:'Shoes',accessory:'Extra',bag:'Bag',strap:'Strap'};
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Swap a piece</span><button type="button" class="linkish" data-close>Done</button></div>
     <div class="segs" role="tablist">${slots.map(k=>`<button type="button" class="label" role="tab" data-swapslot="${k}" aria-pressed="${k===slot}">${label[k]}</button>`).join('')}</div>
     <ul class="swaps">${opts.map(p=>`<li class="${cur&&cur.id===p.id?'cur':''}"><button type="button" data-swapto="${esc(p.id)}" data-slot="${slot}" data-date="${date}"><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(sinceWords(st[p.id].last))} · ${esc(fabricOf(p).name)}</span></span></button></li>`).join('')}
-    ${['accessory','outer','belt','bag','under'].includes(slot)?`<li><button type="button" data-swapto="" data-slot="${slot}" data-date="${date}"><span class="th"></span><span><span class="nm">Without</span><span class="sub">Leave the ${slot==='outer'?'coat':slot==='belt'?'belt':slot==='bag'?'bag':slot==='under'?'t-shirt underneath':'extra'} off</span></span></button></li>`:''}</ul>`);
+    ${['accessory','outer','belt','bag','under','strap'].includes(slot)?`<li><button type="button" data-swapto="" data-slot="${slot}" data-date="${date}"><span class="th"></span><span><span class="nm">Without</span><span class="sub">Leave the ${slot==='outer'?'coat':slot==='belt'?'belt':slot==='bag'?'bag':slot==='under'?'t-shirt underneath':slot==='strap'?'clip-on strap':'extra'} off</span></span></button></li>`:''}</ul>`);
 }
 function sheetReact(date, id){
   const entry = log().find(e=>e.date===date && e.source!=='sample'); if(!entry) return;
