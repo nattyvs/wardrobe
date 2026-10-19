@@ -316,8 +316,8 @@ const hasLoops = p => !!p && (p.shape==='jeans' || p.shape==='trou') && !/pull-o
 const WARM = /camel|brown|tan|rust|orange|khaki|cream|ecru|oatmeal|taupe|beige|mustard|terracotta|red|burgundy|wine|oxblood|berry|raspberry|olive|green/;
 function beltWant(b, need){
   const c = (b.colour||'').toLowerCase();
-  if(b.shape==='jeans' || /denim|chambray|indigo/.test(c)) return 'tan';
   if(/^(black|charcoal|grey|gray|slate)$/.test(c) || c==='black and white') return 'black';
+  if(b.shape==='jeans' || /denim|chambray|indigo/.test(c)) return 'tan';
   if(/navy/.test(c)) return 'white';
   if(WARM.test(c)) return 'tan';
   return need<=1 ? 'white' : 'tan';
@@ -335,6 +335,26 @@ function compatible(a,b){
 const NEUTRAL = /black|white|ivory|cream|grey|gray|charcoal|navy|camel|stone|beige|brown|tan|indigo|denim|taupe|sand/;
 const targetWarmth = need => ({outer: need>=4?5 : need===3?3 : 2, top: need>=4?4 : need===3?3 : need===2?2 : 1, bottom: need>=3?3 : 2, dress: need>=3?3:1, shoes: need>=4?3 : need===3?2 : 1, accessory: need>=4?3 : 1});
 // opts.scope: a Set of ids to draw from (the suitcase). opts.planned: {id: date} of looks already planned, so rewears are spaced out.
+/* Proportion and colour harmony. Fullness and bulk are read from the piece name, because the closet has no field for them. */
+const FULL = p => !!p && p.shape==='skirt' && /pleat|midi|maxi|full|circle|a-line|flare|tiered|gather|wrap/i.test(p.name||'');
+const BULKY = p => !!p && slotOf(p)==='outer' && /bomber|puffer|parka|quilt|down|oversized|chunky|padded/i.test(p.name||'');
+const CHUNKY = p => !!p && slotOf(p)==='top' && /chunky|cable|oversized|fisherman/i.test(p.name||'');
+function proportionClash(a, b){
+  let s = 0;
+  [[a,b],[b,a]].forEach(([x,y])=>{ if(FULL(x) && BULKY(y)) s = Math.max(s, 2.5); if(FULL(x) && CHUNKY(y)) s = Math.max(s, 1.5); });
+  return s;
+}
+function hueOf(hex){
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex||''); if(!m) return null;
+  const n = parseInt(m[1],16), r=(n>>16&255)/255, g=(n>>8&255)/255, b=(n&255)/255;
+  const mx = Math.max(r,g,b), mn = Math.min(r,g,b), d = mx-mn; if(d < 0.08) return null;
+  const h = mx===r ? ((g-b)/d)%6 : mx===g ? (b-r)/d+2 : (r-g)/d+4;
+  return (h*60+360)%360;
+}
+function hueClose(a, b){
+  const x = hueOf(a.hex), y = hueOf(b.hex); if(x==null || y==null) return false;
+  const d = Math.abs(x-y); return Math.min(d, 360-d) <= 45;
+}
 function buildOutfit(date, opts){
   opts = opts || {};
   const scope = opts.scope !== undefined ? opts.scope : tripScope(date);
@@ -358,7 +378,9 @@ function buildOutfit(date, opts){
     if(o==='customer' && p.statement) s += 0.8;
     const ago = recentDays(p.id);
     s += ago===999 ? 2.6 : Math.min(ago, 120)/40;
-    if(ago < 3) s -= 4;
+    // Rest a piece after it has been worn or planned. Outer layers and shoes come back sooner.
+    const rest = (slot==='outer' || slot==='shoes') ? 2 : 3;
+    if(ago < rest) s -= 4; else if(rest===2 && ago < 4) s -= 1.5;
     if(slot==='shoes' && need>=4 && p.shape==='boot') s += 1.2;
     if(slot==='shoes' && w && w.rainChance>=60 && /suede/i.test(p.composition||'')) s -= 3;
     if(R.avoid[p.id]) s -= 3.5;
@@ -373,8 +395,12 @@ function buildOutfit(date, opts){
       let s = score(p, slot);
       const stmt = chosen.filter(c=>c.statement).length;
       if(p.statement && stmt) s -= 2.5;
+      // One colour leads. A second colour is fine when it sits close to the first on the wheel.
       const accent = chosen.find(c=>!NEUTRAL.test(c.colour||''));
-      if(accent && !NEUTRAL.test(p.colour||'')) s -= 2;
+      if(accent && !NEUTRAL.test(p.colour||'')) s -= hueClose(accent, p) ? 0.4 : 2;
+      // One pattern per look, and a full bottom wants a cleaner top and a slimmer outer.
+      if(patterned(p) && chosen.some(patterned)) s -= 2.5;
+      chosen.forEach(c => { s -= proportionClash(c, p); });
       if(chosen.some(c=>pairAvoid(c.id, p.id))) s -= 50;
       return {p, s};
     }).sort((a,b)=>b.s-a.s);
@@ -415,6 +441,25 @@ function applySwaps(res, date){
   return res;
 }
 function tripScope(date){ const t = activeTrip(date); return t && t.packed && t.packed.length ? new Set(t.packed) : null; }
+// At home, the next two weeks are planned in order, so a piece used on one day is rested on the next.
+function homeLooks(){
+  const key = 'home|'+TODAY;
+  if(S.ui.memo[key]) return S.ui.memo[key];
+  const planned = {}, looks = {};
+  S.ui.memo[key] = looks; // guards against re-entry while building
+  for(let i=0; i<14; i++){
+    const date = addDays(TODAY, i);
+    const logged = log().find(e=>e.date===date && e.source!=='sample' && e.items && e.items.length);
+    if(logged){ logged.items.forEach(id=>planned[id] = date); continue; }
+    if(activeTrip(date)) continue;
+    const pd = S.plan && S.plan.days && S.plan.days.find(d=>d.date===date);
+    if(pd && pd.outfit && pd.outfit.length){ pd.outfit.forEach(id=>planned[id] = date); continue; }
+    const res = applySwaps(buildOutfit(date, {planned}), date);
+    res.list.forEach(({p})=>planned[p.id] = date);
+    looks[date] = res;
+  }
+  return looks;
+}
 function outfitFor(date){
   let res, adjusted = null, fromPlan = false;
   const trip = activeTrip(date);
@@ -449,6 +494,9 @@ function outfitFor(date){
         }
       });
     }
+  } else if(!trip && homeLooks()[date]){
+    const m = homeLooks()[date];
+    res = Object.assign({}, m, {slots:Object.assign({}, m.slots)});
   } else res = buildOutfit(date);
   applySwaps(res, date);
   res.adjusted = adjusted; res.fromPlan = fromPlan;
