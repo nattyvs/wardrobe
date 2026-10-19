@@ -232,13 +232,32 @@ The Look lists each piece as a row: Didot number, small flat, piece name in trac
 ### Week Strip
 Seven columns under a charcoal rule: Jost day label, Didot temperature, and a 5px pink dot on customer days. Today's temperature is pink and its label underlined.
 
+### Repeat Mark (the one icon)
+A small circular-arrow glyph at the corner of a closet tile, in the piece sheet and beside a piece in the Look. It says "I've been wearing this a lot". Charcoal outline when off, charcoal fill when on, never pink. It is the single icon in the app: a word would not fit a 3-column tile, and the gesture is a tap with no log entry behind it. Tab bar and buttons stay text.
+
+### Status Segments
+In the piece sheet, availability is a row of tracked Jost labels inside a charcoal frame, same construction as the Feel selector, wrapping to a second row on narrow screens. A piece that is not available keeps its tile, dimmed, and the status replaces the wear caption underneath. No badge.
+
+### Trips
+- **Trip strip (Week):** one hairline-bound line above the seven days. Didot name and dates, a stone count of things to fix. A trip is not a signal, so it stays charcoal.
+- **Packing list:** rows grouped under Didot section caps, each with a small flat or photo, a Didot name, a stone "Works in 4 of 6 looks" caption and a square checkbox.
+- **Weather row:** a column per day with tracked Jost day label, Didot temperature and a stone date. A temperature taken from past years is marked with a "~" and the caption says so.
+- **Gaps panel:** the one place pink is used for an alert in the trip flow. Pink rule on top, plain sentences underneath ("Rain on Mon 26 and nothing packed will cope"). Hidden when there are no gaps.
+- **Forms:** the same underline inputs as Settings. Deleting a trip takes two taps; the first turns the label into "Tap again to delete".
+
+### Reactions and Rules
+After a day is logged, reactions are a wrapping row of square toggles in tracked Jost, charcoal when pressed. A learned rule sits on the piece sheet as a sentence on a stone-ruled row with a text "Undo" action. Sand is not used.
+
+### Face Note
+A one-sentence stone caption under the Look, no rule or fill, used when a cool tone sits at the face and the look carries a warm accent. It states what was added and does not hide the piece.
+
 ### Sheet
 Bottom sheet on sand with the piece image on white, charcoal top rule, sticky bar with a section cap title and a text "Close", sliding up over a scrim with the house ease.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep pink to signals: customer days, neglected pieces, today, weather adjustments, active input.
+- **Do** keep pink to signals: customer days, neglected pieces, today, weather adjustments, active input, and the trip gaps panel.
 - **Do** separate content with 1px hairlines: charcoal for structure, stone for rows.
 - **Do** set editorial content in Didot 400 and controls and data in tracked Jost.
 - **Do** keep every control square (0 radius), including switch thumbs and checkboxes.
@@ -249,6 +268,6 @@ Bottom sheet on sand with the piece image on white, charcoal top rule, sticky ba
 ### Don't:
 - **Don't** fill a button or any other control with pink.
 - **Don't** use cards, drop shadows or rounded corners; the customer-day dot is the only round mark.
-- **Don't** add icons to the tab bar or buttons; navigation is text.
+- **Don't** add icons to the tab bar or buttons; navigation is text. The Repeat Mark is the only exception.
 - **Don't** put clothes on sand, grey or any tinted ground; clothes sit on white. Don't add a dark theme.
 - **Don't** set uppercase without tracking, or set action buttons, tags or tabs in Didot.
