@@ -1,11 +1,11 @@
 ---
 name: Wardrobe
-description: A daily fashion spread for one wardrobe, on warm sand with charcoal ink and a single pink signal.
+description: A daily fashion spread for one wardrobe, clothes on white paper, sand for notes, charcoal ink and a single pink signal.
 colors:
   signal-pink: "#B3005E"
   on-signal: "#FFFFFF"
-  sand-paper: "#ECE8E1"
-  ivory-panel: "#FAF8F4"
+  white-paper: "#FBFBFA"
+  sand-panel: "#ECE8E1"
   charcoal-ink: "#2A2826"
   stone-ink: "#5A564F"
   stone-rule: "#D3CCC1"
@@ -62,7 +62,7 @@ spacing:
 components:
   button-primary:
     backgroundColor: "{colors.charcoal-ink}"
-    textColor: "{colors.sand-paper}"
+    textColor: "{colors.white-paper}"
     typography: "{typography.label}"
     rounded: "{rounded.none}"
     padding: "14px 16px"
@@ -74,7 +74,7 @@ components:
     padding: "14px 16px"
   button-ghost-hover:
     backgroundColor: "{colors.charcoal-ink}"
-    textColor: "{colors.sand-paper}"
+    textColor: "{colors.white-paper}"
   button-disabled:
     backgroundColor: "transparent"
     textColor: "{colors.stone-ink}"
@@ -89,7 +89,7 @@ components:
     rounded: "{rounded.none}"
     padding: "5px 7px"
   panel-look:
-    backgroundColor: "{colors.ivory-panel}"
+    backgroundColor: "{colors.sand-panel}"
     rounded: "{rounded.none}"
     padding: "22px 18px 26px"
   input-underline:
@@ -99,12 +99,12 @@ components:
     rounded: "{rounded.none}"
     padding: "8px 0"
   tab-bar:
-    backgroundColor: "{colors.sand-paper}"
+    backgroundColor: "{colors.white-paper}"
     textColor: "{colors.stone-ink}"
     typography: "{typography.label}"
     height: "54px"
   sheet:
-    backgroundColor: "{colors.ivory-panel}"
+    backgroundColor: "{colors.sand-panel}"
     rounded: "{rounded.none}"
 ---
 
@@ -114,9 +114,9 @@ components:
 
 **Creative North Star: "The Quiet Signals Spread"**
 
-Every screen is a page from a fashion editorial printed on warm sand stock. The day's outfit is the story, laid out as technical flats with numbered notes, set in a high-contrast Didot that is allowed to run oversized and crop off the edge of the page. Everything else, controls, captions and data, is set small in Jost, tracked and quiet. Structure comes from hairline rules, never from boxes, cards or shadows.
+Every screen is a page from a fashion editorial: the clothes sit on white paper, and warm sand is kept for the notes around them. The day's outfit is the story, laid out as technical flats with numbered notes, set in a high-contrast Didot that is allowed to run oversized and crop off the edge of the page. Everything else, controls, captions and data, is set small in Jost, tracked and quiet. Structure comes from hairline rules, never from boxes, cards or shadows.
 
-The palette is near-neutral by design: sand, ivory and charcoal carry almost the whole surface, and the colour on screen comes from the garments themselves. One pink exists, and it is a signal. When pink appears the app is telling her something: a customer day, a piece that has not been worn, today in the week. That scarcity is what makes it readable at 7am.
+The palette is near-neutral by design: white, sand and charcoal carry almost the whole surface, and the colour on screen comes from the garments themselves. One pink exists, and it is a signal. When pink appears the app is telling her something: a customer day, a piece that has not been worn, today in the week. That scarcity is what makes it readable at 7am.
 
 The theme is light only, by decision: this is a morning dressing scene. Density is calm and single-column, sized for one hand on a phone. Motion is limited to one authored moment, the spread settling into place, plus quiet sheet and toast transitions.
 
@@ -124,7 +124,7 @@ The theme is light only, by decision: this is a morning dressing scene. Density 
 - Oversized Didot day name cropped off the left edge, tracked Didot caps for section names.
 - Garments drawn as technical flats: tinted fill, hairline charcoal outline, faint construction lines.
 - Numbered notes (01, 02...) tie the flat-lay to the credits and The Look.
-- Hairline rules for every division; ivory panels for the look notes; no cards, no shadows, no radius.
+- Hairline rules for every division; sand panels for the look notes; no cards, no shadows, no radius.
 - Pink is a signal only, never decoration and never a control colour.
 
 ## Colors
@@ -135,8 +135,8 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 - **Signal Pink** (`signal-pink`): Marks state the app wants noticed. Customer-day tag fill, the number and status line of a neglected or "fresh" piece, today's date in the week strip and Week list, the customer-day dot under a strip day, the closet lede's unworn count, the weather-adjustment note, input focus underline, text selection and caret. White text on pink (`on-signal`) only on the customer tag.
 
 ### Neutral
-- **Sand Paper** (`sand-paper`): The page ground everywhere, the tab bar ground, and the text colour on ink-filled buttons. User-pinned from the Quiet Signals reference; do not "correct" it towards white or grey.
-- **Ivory Panel** (`ivory-panel`): Raised paper for The Look and Colour and Fabric panels, and for bottom sheets. The only change of surface in the system.
+- **White Paper** (`white-paper`): The ground wherever clothes are shown: the Today spread, Week, Closet, the piece image in sheets, the tab bar, and the text colour on ink-filled buttons. Natalia chose white for clothes (19 Oct 2026), as in direction one.
+- **Sand Panel** (`sand-panel`): Kept for supporting surfaces only: The Look and Colour and Fabric panels, and bottom sheet bodies. From the Quiet Signals reference. The only change of surface in the system.
 - **Charcoal Ink** (`charcoal-ink`): All primary text, garment outlines and seams, primary button fill, strong hairline rules (panel tops, the week strip rule, tab bar border, under section heads), focus outline.
 - **Stone Ink** (`stone-ink`): Secondary text: captions, fabric compositions, inactive tabs and filters, disabled buttons.
 - **Stone Rule** (`stone-rule`): Soft hairlines between list rows, the sample-data note borders, the "day off" tag border, the desktop column edges, link underlines at rest.
@@ -144,7 +144,7 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 ### Named Rules
 **The Signal Rule.** Pink means "this needs your attention" and nothing else. If an element is pink, it must be a customer day, a neglected piece, today, an adjustment, or active input. Never a button fill, never a decorative accent, never an illustration colour.
 
-**The Garments Are the Colour Rule.** Chrome stays sand, ivory and charcoal so the clothes carry the colour of each screen.
+**The Garments Are the Colour Rule.** Chrome stays white, sand and charcoal so the clothes carry the colour of each screen. Clothes always sit on white.
 
 ## Typography
 
@@ -171,7 +171,7 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 
 ## Layout
 
-A single phone column, max 480px, centred; above 600px the column gets stone hairlines on both sides and the sand ground continues beyond. Side gutters are 18px or the safe-area inset, whichever is larger. A fixed text tab bar (54px plus safe-area) sits at the bottom; content pads to clear it.
+A single phone column, max 480px, centred; above 600px the column gets stone hairlines on both sides and the white ground continues beyond. Side gutters are 18px or the safe-area inset, whichever is larger. A fixed text tab bar (54px plus safe-area) sits at the bottom; content pads to clear it.
 
 Today is composed as a spread: the hero is a fixed-height stage (clamp(340px, 95vw, 410px)) with absolutely positioned layers: day name top-left cropped, date beneath, temperature block top-right at 29% width behind a charcoal hairline, and garment flats overlapping as an asymmetric flat-lay with numbered labels. Below it, the credits stack (occasion tag, numbered credit line, reason), actions, then the seven-column week strip.
 
@@ -179,7 +179,7 @@ Rhythm is built on list rows of 10 to 14px vertical padding separated by hairlin
 
 ## Elevation & Depth
 
-Flat. There are no shadows anywhere. Depth is conveyed by paper changes (sand to ivory panel), by charcoal versus stone hairlines, and by overlap within the flat-lay. Bottom sheets rise over a dim scrim (`rgba(18,18,18,.32)`) and are marked by a charcoal top rule, not a shadow.
+Flat. There are no shadows anywhere. Depth is conveyed by paper changes (white to sand panel), by charcoal versus stone hairlines, and by overlap within the flat-lay. Bottom sheets rise over a dim scrim (`rgba(18,18,18,.32)`) and are marked by a charcoal top rule, not a shadow.
 
 ### Named Rules
 **The Paper Not Plastic Rule.** Separate things with a rule or a change of paper. If something seems to need a shadow, it needs a hairline.
@@ -195,7 +195,7 @@ The one round form is the 5px customer-day dot under the week strip, a signal ma
 ### Buttons
 Tight, tracked and square; they read like the small print in a magazine.
 - **Shape:** square corners (0), 1px charcoal border.
-- **Primary:** charcoal fill, sand text, Jost 500 10.5px at 0.22em uppercase, 14px by 16px padding. Used once per action row ("Wear this", "Save the log").
+- **Primary:** charcoal fill, white text, Jost 500 10.5px at 0.22em uppercase, 14px by 16px padding. Used once per action row ("Wear this", "Save the log").
 - **Ghost:** transparent with charcoal border and text; on hover it fills charcoal. Secondary actions ("Swap a piece", "Back").
 - **Disabled:** transparent, stone text, stone border ("Worn today").
 - **Text link action:** uppercase tracked label with a 4px-offset underline ("Close", "Add a photo").
@@ -207,20 +207,20 @@ Tight, tracked and square; they read like the small print in a magazine.
 - **Day off:** stone border, stone text.
 
 ### Cards / Containers
-- No cards. Content sits on the sand ground divided by hairlines.
-- **Look panel:** full-bleed ivory, charcoal top rule, 22px top and 26px bottom padding; a stacked panel takes a stone top rule instead.
+- No cards. Content sits on the white ground divided by hairlines.
+- **Look panel:** full-bleed sand, charcoal top rule, 22px top and 26px bottom padding; a stacked panel takes a stone top rule instead.
 - **Plan note:** Didot 17px sentence between two charcoal rules.
 
 ### Inputs / Fields
 - **Style:** underline only, 1px charcoal bottom border, transparent ground, Jost 300 16px, no radius. Labels above as section caps.
 - **Focus:** the underline turns pink; no outline.
-- **Checkbox:** 22px charcoal square, filled charcoal with a sand tick when checked.
-- **Switch:** 42 by 24px square track with a square 16px thumb; checked inverts to charcoal track and sand thumb.
+- **Checkbox:** 22px charcoal square, filled charcoal with a white tick when checked.
+- **Switch:** 42 by 24px square track with a square 16px thumb; checked inverts to charcoal track and white thumb.
 - **Feel selector:** a segmented row of Didot words inside a charcoal frame, divided by charcoal rules; the pressed segment fills charcoal.
 
 ### Navigation
 - **Masthead:** "WARDROBE" in Didot 12px at 0.42em left; the city as an underlined Jost label right.
-- **Tab bar:** fixed, sand ground, charcoal top rule, four text labels (Today, Week, Closet, Log). Inactive stone, active charcoal with a 1px underline. No icons.
+- **Tab bar:** fixed, white ground, charcoal top rule, four text labels (Today, Week, Closet, Log). Inactive stone, active charcoal with a 1px underline. No icons.
 - **Filters and segments:** horizontal scrolling text labels; pressed state is charcoal with an underline, the count in Didot.
 
 ### Garment Flat (signature)
@@ -233,7 +233,7 @@ The Look lists each piece as a row: Didot number, small flat, piece name in trac
 Seven columns under a charcoal rule: Jost day label, Didot temperature, and a 5px pink dot on customer days. Today's temperature is pink and its label underlined.
 
 ### Sheet
-Bottom sheet on ivory, charcoal top rule, sticky bar with a section cap title and a text "Close", sliding up over a scrim with the house ease.
+Bottom sheet on sand with the piece image on white, charcoal top rule, sticky bar with a section cap title and a text "Close", sliding up over a scrim with the house ease.
 
 ## Do's and Don'ts
 
@@ -250,5 +250,5 @@ Bottom sheet on ivory, charcoal top rule, sticky bar with a section cap title an
 - **Don't** fill a button or any other control with pink.
 - **Don't** use cards, drop shadows or rounded corners; the customer-day dot is the only round mark.
 - **Don't** add icons to the tab bar or buttons; navigation is text.
-- **Don't** replace the sand ground with white or a cool grey, or add a dark theme.
+- **Don't** put clothes on sand, grey or any tinted ground; clothes sit on white. Don't add a dark theme.
 - **Don't** set uppercase without tracking, or set action buttons, tags or tabs in Didot.
