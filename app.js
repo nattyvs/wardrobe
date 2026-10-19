@@ -1114,13 +1114,18 @@ function viewDay(date, settle){
   const place = trip ? shortPlace((trip.stops[stopIndexFor(trip, date)]||{}).place) : '';
   const tripLine = trip ? `<p class="triptag"><a href="#trip/${esc(trip.id)}"><span class="label">${esc(place || 'On a trip')}</span></a> <span class="caption">Day ${daysBetween(tripSpan(trip).from, date)+1} of ${tripDays(trip).length}${o.scope ? ', dressed from the suitcase' : ', nothing packed yet'}</span></p>` : '';
   const fnote = faceNote(o);
+  const pics = o.list.length ? lookPictures(o.list.map(x=>x.p.id)) : [];
+  const picSlides = pics.map((lp,i)=>`<figure class="heropic" id="heropic-${i}" aria-label="${lp.real?'Your photo of this look':'ChatGPT try-on of this look'}"><span class="label">${lp.real?'Worn':'Try-on'} · ${esc(lp.real ? nice(lp.date) : verdictWords(lp.tr))}</span><img src="${lp.src}" alt="${lp.real?'You wearing this look':'ChatGPT try-on of this look'}">${lp.real?'':'<figcaption class="caption">AI changes details. Judge the shape and colours.</figcaption>'}</figure>`).join('');
+  const dots = pics.length ? `<div class="herodots" aria-hidden="true">${['',...pics].map((_,i)=>`<i${i===0?' class="on"':''}></i>`).join('')}</div>` : '';
   return `${masthead(isToday ? null : {href:'#week', label:'Week'})}
+  <div class="herow" data-swipe="${pics.length}">
   <section class="hero${settle?' settle':''}" aria-label="${dayName(date)}'s outfit">
     <div class="day" aria-hidden="true">${dayShort(date)}</div>
     <div class="date">${esc(nice(date))}${isToday?'':' · planned'}</div>
     <div class="temp"><div class="deg">${w?w.feel+'°':'–'}</div><span class="fc">${esc(forecastLine(w, date))}</span></div>
     <div class="stage">${pieces || `<p class="empty" style="position:absolute;left:var(--gutter);top:45%">Nothing in the closet fits this day yet.</p>`}</div>
-  </section>
+  </section>${picSlides}
+  </div>${dots}
   <div class="credits">
     ${tripLine}
     <div class="occ"><button type="button" class="tag ${tagCls}" data-act="occ" data-date="${date}" aria-label="Occasion: ${OCC[occ.occ]}. Tap to change.">${OCC[occ.occ]}</button>${occ.note?`<span class="label">${esc(occ.note)}</span>`:''}</div>
@@ -1133,8 +1138,7 @@ function viewDay(date, settle){
   <div class="acts">${actions}</div>
   ${o.list.length ? (()=>{ const rt = ratingFor(date); return `<div class="rate" role="group" aria-label="Rate this look"><span class="label">This look</span><button type="button" class="label" data-rate="1" data-date="${date}" aria-pressed="${!!(rt&&rt.y)}">Love it</button><button type="button" class="label" data-rate="0" data-date="${date}" aria-pressed="${!!(rt&&!rt.y)}">Not for me</button></div>`; })() : ''}
   <nav class="strip" aria-label="This week">${strip}</nav>
-  <section class="panel"><span class="cap">The look</span>${(()=>{ const lp = o.list.length && lookPicture(o.list.map(x=>x.p.id)); if(!lp) return '';
-      return `<figure class="lookpic"><img src="${lp.src}" alt="${lp.real?'You wearing this look':'ChatGPT try-on of this look'}"><figcaption class="caption">${lp.real ? `You, on ${esc(nice(lp.date))}.` : 'ChatGPT’s try-on. AI changes details, so judge the shape and colours.'}${lp.tr ? ` ${esc(verdictWords(lp.tr))}.` : ''}</figcaption></figure>`; })()}<ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">${worthTrying(o, date) ? 'Worth trying on in ChatGPT' : 'Try it on in ChatGPT'}</button></div>`:''}</section>
+  <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">${worthTrying(o, date) ? 'Worth trying on in ChatGPT' : 'Try it on in ChatGPT'}</button></div>`:''}</section>
   <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>
   ${(()=>{ const sc = o.score || (o.list.length ? lookScore(o.slots, date, {}) : null); if(!sc) return ''; const w = weights();
     return `<section class="panel"><span class="cap">How it scores</span><p class="caption pad">Six things a stylist weighs. The weights shift as you rate looks.</p><ul class="scores">${FACTORS.map(([k,l])=>`<li><span class="t">${l}<small>${Math.round(w[k]*100)}% of the score</small></span><span class="bar" aria-label="${Math.round(sc.f[k]*100)} out of 100"><i style="width:${Math.round(sc.f[k]*100)}%"></i></span>${sc.note[k]?`<span class="s">${esc(sc.note[k])}</span>`:''}</li>`).join('')}</ul></section>`; })()}`;
@@ -1701,7 +1705,7 @@ const joinWords = a => a.length>1 ? a.slice(0,-1).join(', ')+' and '+a[a.length-
 function tryPrompt(o){
   const nm = p => String(p.name||'').toLowerCase();
   const outer = o.slots && o.slots.outer;
-  return `Image 1 is a photo of me. Image 2 is a flat-lay of the exact clothes I want to wear: ${joinWords(o.list.map(x=>nm(x.p)))}. Show me wearing exactly these pieces, full length, standing, in soft natural light against a plain background.${outer?` Wear the ${nm(outer)} as the outer layer.`:''} Keep my face, hair, body shape and skin tone exactly as in image 1. Copy each piece's colour and cut from image 2. Don't add or change anything.`;
+  return `Image 1 is a photo of me, taken from the neck down. Image 2 is a flat-lay of the exact clothes I want to wear: ${joinWords(o.list.map(x=>nm(x.p)))}. Show me wearing exactly these pieces, standing, in soft natural light against a plain background.${outer?` Wear the ${nm(outer)} as the outer layer.`:''} Keep my body shape and skin tone as in image 1. Crop the picture at the chin so no face or head shows, and don't add one. Copy each piece's colour and cut from image 2. Don't add or change anything.`;
 }
 const loadImg = src => new Promise((res,rej)=>{ const im = new Image(); im.onload = ()=>res(im); im.onerror = rej; im.src = src; });
 async function photoURL(path){
@@ -1755,7 +1759,7 @@ async function sheetTryOn(date, given){
   const token = Date.now(), name = `wardrobe-look-${String(date).replace(/[^0-9a-z-]/gi,'-')}.jpg`;
   S.ui.try = {date, token, name, prompt: tryPrompt(o), items: o.list.map(x=>x.p.id), sc: o.score || lookScore(o.slots, isoDate(date) ? date : TODAY, {}), verdict:null, off:[]};
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Try it on in ChatGPT</span><button type="button" class="linkish" data-close>Done</button></div>
-    <ol class="try-steps"><li>Save or copy the image of the outfit.</li><li>Copy the prompt.</li><li>In ChatGPT, attach a full-length photo of you and the image, then paste the prompt.</li></ol>
+    <ol class="try-steps"><li>Save or copy the image of the outfit.</li><li>Copy the prompt.</li><li>In ChatGPT, attach your neck-down photo (no face) and the image, then paste the prompt.</li></ol>
     <div id="tryimg"><p class="caption pad" style="margin:16px 0 0">Laying the outfit out…</p></div>
     <div class="field try-prompt"><label class="cap" for="tryprompt">Prompt</label><textarea id="tryprompt" rows="9" spellcheck="false">${esc(S.ui.try.prompt)}</textarea><span class="hint">Change the wording if you like. Copy takes whatever is in the box.</span></div>
     <div class="acts"><button type="button" class="btn" data-act="trycopy">Copy prompt</button><a class="btn ghost" href="https://chatgpt.com/" target="_blank" rel="noopener">Open ChatGPT</a></div>
@@ -1782,18 +1786,18 @@ async function copyText(text){
 const OFF_TAGS = [['colours','The colours'],['proportions','Proportions'],['busy','Too busy'],['plain','Too plain'],['notme','Not me']];
 const isoDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d||'');
 const mainIds = items => (items||[]).map(piece).filter(p=>p && ['top','dress','bottom','outer','shoes'].includes(slotOf(p))).map(p=>p.id);
-// The same look, give or take a coat or a pair of shoes.
-function sameLook(a, b){ const A = new Set(mainIds(a)), B = mainIds(b); if(!A.size || !B.length) return false; const inter = B.filter(x=>A.has(x)).length; return inter / new Set([...A, ...B]).size >= .74; }
+// The same look: exactly the same top or dress, bottom, outer layer and shoes. Belts, scarves and bags don't count.
+function sameLook(a, b){ const A = new Set(mainIds(a)), B = new Set(mainIds(b)); if(!A.size || A.size!==B.size) return false; for(const x of A) if(!B.has(x)) return false; return true; }
 const liveTryons = () => (S.style.tryons||[]).filter(x=>!x.deleted).sort((a,b)=>(b.added||0)-(a.added||0));
 const tryonFor = items => liveTryons().find(t=>sameLook(t.items, items));
 const realFor = items => log().filter(e=>e.source!=='sample' && e.photoPreview && sameLook(e.items, items)).sort((a,b)=>b.date.localeCompare(a.date))[0];
 const picOf = x => { if(x.photo && S.photos[x.photo]) return S.photos[x.photo]; if(x.photo && ghReady()) loadPhoto(x.photo); return x.photoPreview || x.preview; };
-// The best picture of a look: her own photo first, then the render.
-function lookPicture(items){
-  const real = realFor(items), tr = tryonFor(items);
-  if(real) return {src: picOf(real), real:true, date: real.date, tr};
-  if(tr) return {src: picOf(tr), real:false, tr};
-  return null;
+// Every picture of a look, in swipe order: your own photo, then the render.
+function lookPictures(items){
+  const real = realFor(items), tr = tryonFor(items), out = [];
+  if(real) out.push({src: picOf(real), real:true, date: real.date});
+  if(tr) out.push({src: picOf(tr), real:false, tr});
+  return out;
 }
 function verdictWords(t){ return t.verdict==='y' ? 'You loved it' : `Not for you${(t.off||[]).length ? ': '+t.off.map(k=>(OFF_TAGS.find(x=>x[0]===k)||[])[1].toLowerCase()).join(', ') : ''}`; }
 // Worth rendering: a look the app is least sure of. A push or rediscover day, or a main piece never worn.
@@ -2054,6 +2058,12 @@ document.addEventListener('click', async e=>{
     try{ await pull(); render(); toast(closet().length ? `Synced ${closet().length} pieces` : 'Connected. The closet is empty so far.'); }catch(err){ toast(err.message); }
   }
 });
+document.addEventListener('scroll', e=>{
+  const t = e.target; if(!t || !t.classList || !t.classList.contains('herow')) return;
+  const dots = t.nextElementSibling; if(!dots || !dots.classList.contains('herodots')) return;
+  const at = Math.round(t.scrollLeft / Math.max(1, t.clientWidth));
+  [...dots.children].forEach((d,i)=>d.classList.toggle('on', i===at));
+}, true);
 document.addEventListener('input', e=>{
   const sx = e.target;
   if(sx.id==='looknote' && S.ui.look) S.ui.look.note = sx.value;

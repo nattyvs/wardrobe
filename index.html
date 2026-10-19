@@ -402,8 +402,17 @@ h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
 .scores .bar i{position:absolute;inset:0 auto 0 0;background:var(--ink)}
 .scores .s{font-size:12.5px;line-height:1.45;color:var(--ink-2)}
 /* vision */
-.lookpic{margin:0 0 14px;display:grid;gap:6px}
-.lookpic img{width:100%;max-height:440px;object-fit:contain;background:var(--paper)}
+/* the day's look: flat lay first, then your photo and the ChatGPT render, one swipe each */
+.herow{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain}
+.herow::-webkit-scrollbar{display:none}
+.herow>.hero,.herow>.heropic{flex:0 0 100%;scroll-snap-align:start;scroll-snap-stop:always}
+.heropic{position:relative;margin:2px 0 0;height:calc(clamp(340px,95vw,410px) + 98px);background:var(--paper);display:flex;flex-direction:column;align-items:center;padding:34px var(--gutter) 0}
+.heropic .label{position:absolute;left:var(--gutter);top:10px}
+.heropic img{flex:1;min-height:0;max-width:100%;object-fit:contain}
+.heropic .caption{margin:6px 0 4px;text-align:center}
+.herodots{display:flex;justify-content:center;gap:8px;padding:2px 0 0}
+.herodots i{width:6px;height:6px;border-radius:50%;border:1px solid var(--ink);background:transparent}
+.herodots i.on{background:var(--ink)}
 .try-result{margin-top:22px;border-top:1px solid var(--rule);padding-top:14px}
 .try-res{padding:0 var(--gutter)}
 .try-res img{display:block;width:100%;max-height:360px;object-fit:contain;background:var(--paper);margin-top:10px}
