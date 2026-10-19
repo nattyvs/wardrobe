@@ -1014,8 +1014,8 @@ function render(opts){
 }
 
 /* ---------------- views ---------------- */
-function masthead(){
-  return `<header class="mast"><span class="word">Wardrobe</span><button type="button" data-act="city" aria-label="Switch city, now ${esc(settings.city)}"><span class="label">${esc(settings.city)}</span></button></header>
+function masthead(back){
+  return `<header class="mast">${back ? `<a class="back" href="${back.href}" aria-label="Back to ${esc(back.label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span class="label">${esc(back.label)}</span></a>` : '<span class="word">Wardrobe</span>'}<button type="button" data-act="city" aria-label="Switch city, now ${esc(settings.city)}"><span class="label">${esc(settings.city)}</span></button></header>
   ${settings.sample || (S.weather&&S.weather.sample) ? `<p class="sample-note">${settings.sample?'Sample wardrobe':'Your wardrobe'}${S.weather&&S.weather.sample?' and sample forecast':''}.${settings.sample?` <a href="#log/settings">Connect yours</a>`:''}</p>` : ''}`;
 }
 // where each kind of piece sits on the spread, in % of the hero
@@ -1060,7 +1060,7 @@ function viewDay(date, settle){
   const place = trip ? shortPlace((trip.stops[stopIndexFor(trip, date)]||{}).place) : '';
   const tripLine = trip ? `<p class="triptag"><a href="#trip/${esc(trip.id)}"><span class="label">${esc(place || 'On a trip')}</span></a> <span class="caption">Day ${daysBetween(tripSpan(trip).from, date)+1} of ${tripDays(trip).length}${o.scope ? ', dressed from the suitcase' : ', nothing packed yet'}</span></p>` : '';
   const fnote = faceNote(o);
-  return `${masthead()}
+  return `${masthead(isToday ? null : {href:'#week', label:'Week'})}
   <section class="hero${settle?' settle':''}" aria-label="${dayName(date)}'s outfit">
     <div class="day" aria-hidden="true">${dayShort(date)}</div>
     <div class="date">${esc(nice(date))}${isToday?'':' · planned'}</div>

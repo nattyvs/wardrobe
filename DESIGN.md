@@ -223,6 +223,7 @@ Tight, tracked and square; they read like the small print in a magazine.
 
 ### Navigation
 - **Masthead:** "WARDROBE" in Didot 12px at 0.42em left; the city as an underlined Jost label right.
+- **Back link:** on a day page other than today, the masthead shows a chevron and "Week" in place of the Wardrobe word, 44px high, returning to the Week page.
 - **Tab bar:** fixed, white ground, charcoal top rule, five tabs (Today, Week, Closet, Style, Log), each a 22px line icon above a 9.5px label. Icons are 1.3px strokes in currentColor (sun, calendar, hanger, four-point star, circled tick), 1.6px when active. Inactive stone, active charcoal with a 1px underline on the label. Trips is not a tab: it is a text link at the top right of the Week page.
 - **Filters and segments:** horizontal scrolling text labels; pressed state is charcoal with an underline, the count in Didot.
 
