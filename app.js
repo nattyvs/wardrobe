@@ -1235,8 +1235,8 @@ const CTYPES = [
   ['coats','Coats', p=>p.cat==='outer' && p.shape!=='jumper'],
   ['tops','Tops', p=>p.cat==='top' && !isKnitTop(p)],
   ['knits','Knits', p=>isKnitTop(p) || (p.cat==='outer' && p.shape==='jumper')],
-  ['trousers','Trousers', p=>p.cat==='bottom' && p.shape!=='skirt'],
-  ['skirts','Skirts', p=>p.cat==='bottom' && p.shape==='skirt'],
+  ['trousers','Trousers', p=>p.cat==='bottom' && (p.shape!=='skirt' || /shorts/i.test(p.name||''))],
+  ['skirts','Skirts', p=>p.cat==='bottom' && p.shape==='skirt' && !/shorts/i.test(p.name||'')],
   ['dresses','Dresses', p=>p.cat==='dress'],
   ['shoes','Shoes', p=>p.cat==='shoes'],
   ['bags','Bags', p=>p.cat==='bag'],
@@ -1248,7 +1248,7 @@ const KINDS = {
   coats:[['puffers','Puffers',p=>/puffer|down/.test(nm(p))],['jackets','Jackets',p=>!/puffer|down/.test(nm(p)) && (p.shape==='blazer' || /jacket|bomber/.test(nm(p)))],['coats','Coats',p=>!/puffer|down/.test(nm(p)) && p.shape!=='blazer' && !/jacket|bomber/.test(nm(p))]],
   tops:[['tees','T-shirts',p=>p.shape==='tee' && !/vest|cami|halter|long-sleeve/.test(nm(p))],['long','Long-sleeve',p=>/long-sleeve|turtleneck|crew/.test(nm(p))],['vests','Vests and camis',p=>/vest|cami|halter/.test(nm(p))],['blouses','Blouses and shirts',p=>p.shape==='shirt' || /blouse|shirt/.test(nm(p))]],
   knits:[['jumpers','Jumpers',p=>p.cat==='top' && p.shape==='jumper'],['rollnecks','Roll-necks',p=>p.cat==='top' && p.shape==='knit'],['cardigans','Cardigans',p=>p.cat==='outer']],
-  trousers:[['jeans','Jeans',p=>p.shape==='jeans'],['trousers','Trousers',p=>p.shape!=='jeans' && !/shorts/.test(nm(p))],['shorts','Shorts',p=>/shorts/.test(nm(p))]],
+  trousers:[['jeans','Jeans',p=>p.shape==='jeans' && !/shorts/.test(nm(p))],['trousers','Trousers',p=>p.shape!=='jeans' && !/shorts/.test(nm(p))],['shorts','Shorts',p=>/shorts/.test(nm(p))]],
   skirts:byLength, dresses:byLength,
   shoes:[['trainers','Trainers',p=>p.shape==='trainer'],['boots','Boots',p=>p.shape==='boot'],['flats','Flats',p=>p.shape==='flat']],
   bags:[['crossbody','Crossbody',p=>/crossbody|pouch/.test(nm(p))],['shoulder','Shoulder and totes',p=>!/crossbody|pouch/.test(nm(p))]],
@@ -2072,9 +2072,10 @@ function tryResultBlock(){
   const prev = before ? `<p class="caption pad">You tried this on before. ${esc(verdictWords(before))}. A new picture is saved alongside it.</p>` : '';
   if(!tr.res) return `${prev}<div class="acts"><label class="btn" for="tryresult">Add the result</label><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
   return `<div class="try-res"><img src="${tr.res.preview}" alt="ChatGPT's try-on"></div>
-    <div class="rate" role="group" aria-label="Your verdict"><span class="label">This look</span><button type="button" class="label" data-tryv="1" aria-pressed="${tr.verdict===true}">Love it</button><button type="button" class="label" data-tryv="m" aria-pressed="${tr.verdict==='m'}">Not sure yet</button><button type="button" class="label" data-tryv="0" aria-pressed="${tr.verdict===false}">Not for me</button></div>
+    <div class="field"><span class="cap">Your verdict</span></div>
+    <div class="verdict3" role="group" aria-label="Your verdict"><button type="button" class="label" data-tryv="1" aria-pressed="${tr.verdict===true}">Love it</button><button type="button" class="label" data-tryv="m" aria-pressed="${tr.verdict==='m'}">Not sure</button><button type="button" class="label" data-tryv="0" aria-pressed="${tr.verdict===false}">Not for me</button></div>
     ${tr.verdict===false ? `<div class="field"><span class="cap">What's off?</span></div>${tagChips(OFF_TAGS, tr.off||[], 'data-tryoff')}` : ''}
-    <div class="acts"><button type="button" class="btn" data-act="tryonsave">Save</button><label class="linkish" for="tryresult">Pick another</label><button type="button" class="linkish" data-act="tryclear">Remove</button><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
+    <div class="acts try-acts"><button type="button" class="btn" data-act="tryonsave">Save</button><label class="linkish" for="tryresult">Pick another</label><button type="button" class="linkish" data-act="tryclear">Remove</button><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
 }
 const refreshTry = () => { const el = $('#tryres'); if(el) el.innerHTML = tryResultBlock(); };
 async function saveTryon(){
