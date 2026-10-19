@@ -384,7 +384,15 @@ function buildOne(date, opts){
   const target = targetWarmth(need);
   function score(p, slot){
     let s = 0;
-    if(target[slot]!=null) s -= Math.abs(warmthOf(p) - target[slot]) * (slot==='shoes' ? 0.6 : 1.1);
+    // Shoes follow the weather a little, never as a rule. Trainers go with woollen socks in the cold and boots are
+    // fine from about 5°. Light flats lean away from cold days, trainers from rain, boots from anything over 16°.
+    if(slot==='shoes'){
+      const wet = w && w.rainChance>=60;
+      if(p.shape==='trainer'){ if(need>=5) s -= .4; if(wet) s -= 1.2; }
+      else if(p.shape==='boot'){ if(t>=16) s -= 1.4; else if(need>=4) s += .3; if(wet) s += .6; }
+      else if(warmthOf(p)<=1){ if(need>=4) s -= 1.2; else if(need===3) s -= .5; }
+    }
+    else if(target[slot]!=null) s -= Math.abs(warmthOf(p) - target[slot]) * 1.1;
     // She wears trainers to the office and to customer meetings: no formality pull on them there.
     // Other shoes get a lighter formality pull than clothes.
     if(!(slot==='shoes' && p.shape==='trainer' && (!p.occasions || !p.occasions.length || p.occasions.includes(o)))) s -= Math.max(0, formal - (p.formality||2)) * (slot==='shoes' ? 0.5 : 1.6);
@@ -403,7 +411,6 @@ function buildOne(date, opts){
       if(ago < rest) s -= 4; else if(rest===2 && ago < 4) s -= 1.5;
     }
     // Boots earn their place on properly cold or wet days, not on every autumn day.
-    if(slot==='shoes' && p.shape==='boot') s += need>=5 ? 1.2 : (w && w.rainChance>=60) ? 0.8 : need>=4 ? 0.3 : 0;
     if(slot==='shoes' && w && w.rainChance>=60 && /suede/i.test(p.composition||'')) s -= 3;
     if(R.avoid[p.id]) s -= 3.5;
     if(R.loved[p.id]) s += 0.8;
