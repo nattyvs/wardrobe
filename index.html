@@ -20,8 +20,8 @@
 @font-face{font-family:"W Jost";font-style:italic;font-weight:300 600;font-display:swap;src:url(fonts/Jost-Italic-var.woff) format("woff")}
 /* Quiet signals: a fashion spread on warm sand, charcoal ink, technical flats. Pink appears only when the app is telling you something. */
 :root{
-  --paper:#ECE8E1; --panel:#FAF8F4; --ink:#2A2826; --ink-2:#5A564F; --rule:#2A2826; --rule-soft:#D3CCC1; --wash:#E3DED5;
-  --pink:#B3005E; --on-pink:#FFFFFF; --pink-wash:#F4E1EA;
+  --paper:#ECE8E1; --panel:#FAF8F4; --ink:#2A2826; --ink-2:#5A564F; --rule:#2A2826; --rule-soft:#D3CCC1;
+  --pink:#B3005E; --on-pink:#FFFFFF;
   --didot:"W Didot","Didot","Bodoni 72","Bodoni MT",serif;
   --jost:"W Jost","Futura","Avenir Next","Helvetica Neue",Arial,sans-serif;
   --gutter:max(18px, env(safe-area-inset-left, 0px));
@@ -136,10 +136,9 @@ button.tag{cursor:pointer}
 /* ---------- buttons ---------- */
 .acts{display:flex;gap:8px;padding:16px var(--gutter-r) 0 var(--gutter);flex-wrap:wrap}
 .btn{font:500 10.5px/1 var(--jost);letter-spacing:.22em;text-transform:uppercase;padding:14px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);border-radius:0;transition:background .2s,color .2s}
-.btn:hover{background:#000}
+.btn:hover{opacity:.86}
 .btn.ghost{background:transparent;color:var(--ink)}
 .btn.ghost:hover{background:var(--ink);color:var(--paper)}
-.btn.pink{background:var(--pink);border-color:var(--pink);color:var(--on-pink)}
 .btn[disabled]{background:transparent;color:var(--ink-2);border-color:var(--rule-soft);cursor:default}
 .linkish{background:none;border:0;padding:0;color:var(--ink);cursor:pointer;font:500 10.5px/1 var(--jost);letter-spacing:.22em;text-transform:uppercase;text-decoration:underline;text-underline-offset:4px}
 
