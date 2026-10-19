@@ -17,17 +17,17 @@
     loafer: {vb:'0 0 100 50',  d:'M6 32c0-14 20-18 42-14 24 4 46 2 46 18 0 8-16 8-46 6C26 40 6 42 6 32Z', seam:'M44 20h24v8H44Z'},
     trainer:{vb:'0 0 100 54',  d:'M6 36c0-10 6-22 16-22 10 0 20 10 34 12 14 2 38 4 38 18v4H6Z', seam:'M6 42h88M30 18l6 10M38 20l6 10'},
     boot:   {vb:'0 0 100 110', d:'M30 4h30v62c14 6 34 10 34 30v10H22l-2-18c0-14 10-22 10-34Z', seam:'M30 14h30M22 96h72'},
-    scarf:  {vb:'0 0 40 120',  d:'M8 2h24v84l6 30h-12l-6-20-6 20H2l6-30Z', seam:'M8 20h24M8 38h24M8 56h24'},
+    scarf:  {vb:'0 0 40 120',  d:'M9 3c6-2 16-2 22 0l3 92-6 18h-4l-3-10-3 10h-4l-4-10-3 10H3l3-18Z', seam:'M8 98h26M12 101v10M17 101v9M22 101v10M27 101v9M10 30c8 3 14 3 22 0'},
     bag:    {vb:'0 0 100 90',  d:'M14 34h72l6 52H8Z', seam:'M34 34c0-34 32-34 32 0'}
   };
   window.GARMENT_SHAPES = Object.keys(S);
   window.garmentSVG = function(shape, colour, label){
     const g = S[shape] || S.tee;
     const t = label ? `<title>${label}</title>` : '';
-    const light = /^#(f|e|d)/i.test(colour||'');
-    const seam = light ? 'rgba(0,0,0,.18)' : 'rgba(255,255,255,.22)';
-    const fill = shape === 'bag' ? `<path d="${g.seam}" fill="none" stroke="${colour}" stroke-width="5"/>` : '';
-    return `<svg viewBox="${g.vb}" class="garment-svg" role="img"${label?` aria-label="${label}"`:''}>${t}${fill}<path d="${g.d}" fill="${colour}"/>${shape==='bag'?'':`<path d="${g.seam}" fill="none" stroke="${seam}" stroke-width="1.5"/>`}</svg>`;
+    const line = 'var(--ink, #2A2826)';
+    const handle = shape === 'bag' ? `<path d="${g.seam}" fill="none" stroke="${line}" stroke-width="1.1" vector-effect="non-scaling-stroke"/>` : '';
+    const seams = shape === 'bag' ? '' : `<path d="${g.seam}" fill="none" stroke="${line}" stroke-opacity=".55" stroke-width=".8" vector-effect="non-scaling-stroke"/>`;
+    return `<svg viewBox="-1 -1 ${+g.vb.split(' ')[2]+2} ${+g.vb.split(' ')[3]+2}" class="garment-svg" role="img"${label?` aria-label="${label}"`:''}>${t}${handle}<path d="${g.d}" fill="${colour}" stroke="${line}" stroke-width="1.1" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>${seams}</svg>`;
   };
   window.garmentRatio = function(shape){ const g = S[shape] || S.tee; const p = g.vb.split(' '); return (+p[2])/(+p[3]); };
 })();

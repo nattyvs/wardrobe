@@ -123,8 +123,8 @@ function wx(date){ return (S.weather && S.weather.days[date]) || null; }
 function band(t){ return t>=20?1 : t>=15?2 : t>=10?3 : t>=5?4 : 5; }
 function forecastLine(w){
   if(!w) return 'No forecast yet';
-  if(w.rainFrom!=null){ const h = w.rainFrom; const t = h===12 ? 'midday' : h<12 ? `${h}am` : `${h-12}pm`; return h<=9 ? 'Rain most of the day' : `Rain after ${t}`; }
-  return `Dry, ${w.min}° to ${w.max}°`;
+  if(w.rainFrom!=null){ const h = w.rainFrom; const t = h===12 ? 'midday' : h<12 ? `${h}am` : `${h-12}pm`; return h<=9 ? 'Rain all day' : `Rain after ${t}`; }
+  return `Dry · ${w.min}–${w.max}°`;
 }
 
 /* ---------------- fabric ---------------- */
@@ -151,25 +151,6 @@ function fabricOf(p){
   if(/cotton/.test(c)) return sh==='tee' ? {name:'Cotton jersey', tex:'fine', note:'Soft and light. A base layer.'} : {name:'Cotton', tex:'weave', note:'Breathable everyday cloth.'};
   return {name: p.composition ? cap1(p.composition) : 'Fabric to add', tex:'fine', note: p.composition ? '' : 'Add the composition from the label.'};
 }
-const texCache = {};
-function texture(kind, hex){
-  const key = kind+hex; if(texCache[key]) return texCache[key];
-  const W=240, H=180, cv=document.createElement('canvas'); cv.width=W; cv.height=H;
-  const g = cv.getContext('2d'); g.fillStyle=hex; g.fillRect(0,0,W,H);
-  let seed = hash(key)*1e6; const rnd = ()=>{ seed=(seed*16807)%2147483647; return seed/2147483647; };
-  const light = (()=>{ const n=parseInt(hex.slice(1),16); return ((n>>16)*0.299+((n>>8)&255)*0.587+(n&255)*0.114)>150; })();
-  const hi = light ? 'rgba(255,255,255,' : 'rgba(255,255,255,', lo = 'rgba(0,0,0,';
-  if(kind==='ribs'){ for(let x=0;x<W;x+=6){ g.fillStyle=lo+'.16)'; g.fillRect(x,0,2,H); g.fillStyle=hi+'.08)'; g.fillRect(x+3,0,1.5,H);} for(let y=0;y<H;y+=4){ g.fillStyle=lo+'.04)'; g.fillRect(0,y,W,1);} }
-  else if(kind==='twill'){ g.lineWidth=1.4; for(let k=-H;k<W;k+=5){ g.strokeStyle=lo+(.08+rnd()*.08)+')'; g.beginPath(); g.moveTo(k,H); g.lineTo(k+H,0); g.stroke(); } }
-  else if(kind==='weave'){ for(let x=0;x<W;x+=3){ g.fillStyle=lo+(.03+rnd()*.04)+')'; g.fillRect(x,0,1,H);} for(let y=0;y<H;y+=3){ g.fillStyle=hi+(.04+rnd()*.05)+')'; g.fillRect(0,y,W,1);} }
-  else if(kind==='slub'){ for(let i=0;i<70;i++){ const y=rnd()*H; g.fillStyle=(rnd()>.5?hi:lo)+(.06+rnd()*.08)+')'; g.fillRect(rnd()*W*.3, y, 40+rnd()*160, 1+rnd()*1.5);} for(let x=0;x<W;x+=4){ g.fillStyle=lo+'.04)'; g.fillRect(x,0,1,H);} }
-  else if(kind==='sheen'){ const gr=g.createLinearGradient(0,0,W,H); gr.addColorStop(0,'rgba(255,255,255,0)'); gr.addColorStop(.45,'rgba(255,255,255,.22)'); gr.addColorStop(.55,'rgba(255,255,255,.05)'); gr.addColorStop(1,'rgba(0,0,0,.12)'); g.fillStyle=gr; g.fillRect(0,0,W,H); }
-  else if(kind==='grain'){ for(let i=0;i<1600;i++){ g.fillStyle=(rnd()>.5?hi:lo)+(.04+rnd()*.07)+')'; const r=.6+rnd()*2.2; g.beginPath(); g.arc(rnd()*W,rnd()*H,r,0,7); g.fill(); } }
-  else if(kind==='felt'){ for(let i=0;i<5000;i++){ g.fillStyle=(rnd()>.5?hi:lo)+(.03+rnd()*.05)+')'; g.fillRect(rnd()*W,rnd()*H,1+rnd()*2,1); } }
-  else { for(let i=0;i<2500;i++){ g.fillStyle=lo+(.02+rnd()*.04)+')'; g.fillRect(rnd()*W,rnd()*H,1,1);} }
-  return texCache[key] = cv.toDataURL('image/png');
-}
-
 /* ---------------- drawing a piece ---------------- */
 function art(p){
   if(!p) return '';
@@ -367,13 +348,13 @@ function render(opts){
 /* ---------------- views ---------------- */
 function masthead(){
   return `<header class="mast"><span class="word">Wardrobe</span><button type="button" data-act="city" aria-label="Switch city, now ${esc(settings.city)}"><span class="label">${esc(settings.city)}</span></button></header>
-  ${settings.sample ? `<p class="sample-note">You're looking at a sample wardrobe. <a href="#log/settings">Connect yours</a></p>` : ''}`;
+  ${settings.sample || (S.weather&&S.weather.sample) ? `<p class="sample-note">${settings.sample?'Sample wardrobe':'Your wardrobe'}${S.weather&&S.weather.sample?' and sample forecast':''}.${settings.sample?` <a href="#log/settings">Connect yours</a>`:''}</p>` : ''}`;
 }
 // where each kind of piece sits on the spread, in % of the hero
 const LAYOUT = {
-  outer:{x:33,y:35,w:42}, top:{x:5,y:50,w:30}, dress:{x:5,y:46,w:30}, bottom:{x:59,y:54,w:25}, shoes:{x:9,y:86,w:24}, accessory:{x:84,y:38,w:12}
+  outer:{x:36,y:31,w:46,z:1}, bottom:{x:54,y:50,w:28,z:2}, top:{x:7,y:42,w:36,z:3}, dress:{x:9,y:38,w:33,z:3}, shoes:{x:52,y:85,w:28,z:4}, accessory:{x:30,y:37,w:10,z:5}
 };
-const LAYOUT_NO_OUTER = {top:{x:28,y:34,w:40}, dress:{x:30,y:30,w:36}, bottom:{x:62,y:50,w:26}, shoes:{x:10,y:84,w:24}, accessory:{x:8,y:40,w:13}};
+const LAYOUT_NO_OUTER = {top:{x:20,y:30,w:44,z:3}, dress:{x:24,y:27,w:38,z:3}, bottom:{x:50,y:46,w:32,z:2}, shoes:{x:10,y:85,w:28,z:4}, accessory:{x:68,y:28,w:11,z:5}};
 function viewDay(date, settle){
   const o = outfitFor(date), w = wx(date), occ = occasionFor(date), st = stats(date);
   const isToday = date===TODAY, worn = log().find(e=>e.date===date && e.source!=='sample');
@@ -383,7 +364,7 @@ function viewDay(date, settle){
     const pos = L[slot] || LAYOUT[slot]; n++;
     const fresh = o.hero && o.hero.id===p.id;
     const r = window.garmentRatio(p.shape||'tee');
-    return `<button type="button" class="piece${fresh?' fresh':''}" data-piece="${esc(p.id)}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;" aria-label="${esc(p.name)}"><span class="no">${pad(n)}</span>${art(p)}</button>`;
+    return `<button type="button" class="piece slot-${slot}${fresh?' fresh':''}" data-piece="${esc(p.id)}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;z-index:${pos.z||1}" aria-label="${esc(p.name)}"><span class="no">${pad(n)}</span>${art(p)}</button>`;
   }).join('');
   const nums = {}; o.list.forEach((x,i)=>nums[x.p.id]=pad(i+1));
   const notes = o.list.map(({p})=>{
@@ -392,7 +373,7 @@ function viewDay(date, settle){
     return `<li class="${fresh?'fresh':''}"><span class="n">${nums[p.id]}</span><span class="fl">${art(p)}</span><button type="button" data-piece="${esc(p.id)}"><span class="t">${esc(p.name)}</span><span class="s">${esc(sub)}</span></button></li>`;
   }).join('');
   const fabrics = []; const seen = {};
-  o.list.forEach(({p})=>{ const f = fabricOf(p); if(seen[f.name]) return; seen[f.name]=1; fabrics.push(`<div class="fabric"><div class="sw" style="background-image:url(${texture(f.tex, p.hex||'#999')})" role="img" aria-label="${esc(f.name)} swatch"></div><span class="t">${esc(f.name)}</span><span class="s">${esc(f.note)}</span></div>`); });
+  o.list.forEach(({p})=>{ const f = fabricOf(p); if(seen[f.name]) return; seen[f.name]=1; const sw = p.swatch && S.photos[p.swatch] ? `background-image:url(${S.photos[p.swatch]})` : `background-color:${esc(p.hex||'#999')}`; if(p.swatch && !S.photos[p.swatch] && ghReady()) loadPhoto(p.swatch); fabrics.push(`<div class="fabric"><div class="sw" style="${sw}" role="img" aria-label="${esc(f.name)}, ${esc(p.colour||'')}"></div><span class="t">${esc(f.name)}</span><span class="s">${esc(f.note)}</span></div>`); });
   const pal = []; const pseen = {};
   o.list.forEach(({p})=>{ const c = (p.colour||'').toLowerCase(); if(!c||pseen[c]) return; pseen[c]=1; pal.push(`<li><i style="background:${esc(p.hex)}"></i>${esc(c)}</li>`); });
   const strip = weekOf(date).map(d=>{ const ww = wx(d), oc = occasionFor(d).occ; return `<a href="#day/${d}" class="${d===date?'on':''}" aria-label="${dayName(d)} ${nice(d)}"><span class="label">${dayShort(d)}</span><b>${ww?ww.feel+'°':'·'}</b><i class="${oc==='customer'?'':'no'}"></i></a>`; }).join('');
@@ -404,11 +385,12 @@ function viewDay(date, settle){
   <section class="hero${settle?' settle':''}" aria-label="${dayName(date)}'s outfit">
     <div class="day" aria-hidden="true">${dayShort(date)}</div>
     <div class="date">${esc(nice(date))}${isToday?'':' · planned'}</div>
-    <div class="temp"><div class="deg">${w?w.feel+'°':'–'}</div><span class="fc">${esc(forecastLine(w))}${S.weather&&S.weather.sample?'<br>Sample forecast':''}</span></div>
+    <div class="temp"><div class="deg">${w?w.feel+'°':'–'}</div><span class="fc">${esc(forecastLine(w))}</span></div>
     ${pieces || `<p class="empty" style="position:absolute;left:var(--gutter);top:45%">Nothing in the closet fits this day yet.</p>`}
   </section>
   <div class="credits">
     <div class="occ"><button type="button" class="tag ${tagCls}" data-act="occ" data-date="${date}" aria-label="Occasion: ${OCC[occ.occ]}. Tap to change.">${OCC[occ.occ]}</button>${occ.note?`<span class="label">${esc(occ.note)}</span>`:''}</div>
+    <p class="credit-line">${o.list.map(({p},i)=>`<span><b>${pad(i+1)}</b> <button type="button" data-piece="${esc(p.id)}">${esc(p.name)}</button>, ${esc(fabricOf(p).name.toLowerCase())}</span>`).join(' ')}</p>
     <p class="why">${esc(whyLine(o, date))}</p>
     ${o.adjusted?`<p class="adjusted">${esc(o.adjusted)}</p>`:''}
   </div>
