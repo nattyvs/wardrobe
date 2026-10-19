@@ -1127,7 +1127,7 @@ function viewDay(date, settle){
   const tripLine = trip ? `<p class="triptag"><a href="#trip/${esc(trip.id)}"><span class="label">${esc(place || 'On a trip')}</span></a> <span class="caption">Day ${daysBetween(tripSpan(trip).from, date)+1} of ${tripDays(trip).length}${o.scope ? ', dressed from the suitcase' : ', nothing packed yet'}</span></p>` : '';
   const fnote = faceNote(o);
   const pics = o.list.length ? lookPictures(o.list.map(x=>x.p.id)) : [];
-  const picSlides = pics.map((lp,i)=>`<figure class="heropic" id="heropic-${i}" aria-label="${lp.real?'Your photo of this look':'ChatGPT try-on of this look'}"><button type="button" class="linkish rmpic" data-act="rmpic" data-kind="${lp.real?'worn':'tryon'}" data-id="${esc(lp.real ? lp.date : lp.tr.id)}">Remove</button><span class="label">${lp.real?'Worn':'Try-on'} · ${esc(lp.real ? nice(lp.date) : verdictWords(lp.tr))}</span><img src="${lp.src}" alt="${lp.real?'You wearing this look':'ChatGPT try-on of this look'}">${lp.real?'':'<figcaption class="caption">AI changes details. Judge the shape and colours.</figcaption>'}</figure>`).join('');
+  const picSlides = pics.map((lp,i)=>`<figure class="heropic" id="heropic-${i}" aria-label="${lp.real?'Your photo of this look':'ChatGPT try-on of this look'}"><button type="button" class="linkish rmpic" data-act="rmpic" data-kind="${lp.real?'worn':'tryon'}" data-id="${esc(lp.real ? lp.date : lp.tr.id)}">Remove</button><span class="label">${lp.real?'Worn':'Try-on'} · ${esc(lp.real ? nice(lp.date) : verdictWords(lp.tr))}</span><img src="${lp.src}" alt="${lp.real?'You wearing this look':'ChatGPT try-on of this look'}">${lp.real?'':'<figcaption class="caption">AI changes details. Judge the shape and colours.</figcaption>'}${lp.real?'':deciders(lp.tr)}</figure>`).join('');
   const dots = pics.length ? `<div class="herodots" aria-hidden="true">${['',...pics].map((_,i)=>`<i${i===0?' class="on"':''}></i>`).join('')}</div>` : '';
   return `${masthead(isToday ? null : {href:'#week', label:'Week'})}
   <div class="herow" data-swipe="${pics.length}">
@@ -1576,7 +1576,7 @@ function viewStyle(arg){
   <section class="panel"><span class="cap">Try-ons</span><p class="caption pad">ChatGPT renders you saved, with your verdict. When you wear a look and add a mirror photo, the photo replaces the render.</p>
     ${(()=>{ const ts = liveTryons(); if(!ts.length) return `<p class="caption pad">None yet. Open a day, tap Try it on in ChatGPT, then add the picture you get back.</p>`;
       return `<ul class="inspo tryons">${ts.map(t=>{ const real = realFor(t.items), src = real ? picOf(real) : picOf(t), ps = (t.items||[]).map(piece).filter(Boolean);
-        return `<li><span class="in-ph"><img src="${src}" alt=""><span class="badge">${real?'Worn':'Render'}</span></span><span class="thumbs">${ps.map(p=>`<span>${art(p)}</span>`).join('')}</span><span class="sub">${esc(verdictWords(t))}${real?` · worn ${esc(nice(real.date))}`:''}</span><button type="button" class="linkish rm" data-act="rmstyle" data-kind="tryons" data-id="${esc(t.id)}">Remove</button></li>`; }).join('')}</ul>`; })()}</section>
+        return `<li><span class="in-ph"><img src="${src}" alt=""><span class="badge">${real?'Worn':'Render'}</span></span><span class="thumbs">${ps.map(p=>`<span>${art(p)}</span>`).join('')}</span><span class="sub">${esc(verdictWords(t))}${real?` · worn ${esc(nice(real.date))}`:''}</span>${deciders(t)}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="tryons" data-id="${esc(t.id)}">Remove</button></li>`; }).join('')}</ul>`; })()}</section>
   <section class="panel"><span class="cap">Do I already own this?</span><p class="caption pad">Before you buy, snap the piece. The app shows what in your closet looks most like it.</p>
     ${S.ui.own ? (()=>{ const w = wrongFor(S.ui.own.ref), list = (S.ui.own.overall||[]).filter(m=>!w.has(m.id) && piece(m.id)).slice(0,4), top = list[0];
       return `<div class="own pad"><img src="${S.ui.own.preview}" alt="The piece you checked">${S.ui.own.overall ? matchRow(list, S.ui.own.ref, true) : ''}</div>${S.ui.own.overall ? `<p class="caption pad">${top && top.sim>=.9 ? `You own something very like this: the ${esc(piece(top.id).name.toLowerCase())}.` : top && top.sim>=.84 ? 'You have something close. Worth a look before buying.' : 'Nothing very like it in your closet.'}</p>` : ''}`; })() : ''}
@@ -1965,7 +1965,19 @@ function lookPictures(items){
   if(tr) out.push({src: picOf(tr), real:false, tr});
   return out;
 }
-function verdictWords(t){ return t.verdict==='y' ? 'You loved it' : `Not for you${(t.off||[]).length ? ': '+t.off.map(k=>(OFF_TAGS.find(x=>x[0]===k)||[])[1].toLowerCase()).join(', ') : ''}`; }
+const deciders = t => t && t.verdict==='m' ? `<span class="deciders"><button type="button" class="linkish" data-act="decide" data-id="${esc(t.id)}" data-v="1">Love it</button><button type="button" class="linkish" data-act="decide" data-id="${esc(t.id)}" data-v="0">Not for me</button></span>` : '';
+function decideTryon(id, yes){
+  const x = (S.style.tryons||[]).find(y=>y.id===id); if(!x || x.verdict!=='m') return;
+  x.verdict = yes ? 'y' : 'n'; x.off = []; x.updated = Date.now();
+  if(x.f){
+    const w = weights(), sc = {f:x.f, total: FACTORS.reduce((a,[k])=>a+w[k]*x.f[k],0)};
+    S.style.ratings = (S.style.ratings||[]).concat([{date:x.date, items:x.items, y:yes, mode:'tryon', src:'tryon', ref:id, f:x.f, at:Date.now()}]);
+    learnFrom(sc, yes, 0.04);
+  }
+  if(yes && isoDate(x.date) && x.date>=TODAY) pinLook(x.date, x.items);
+  queuePush({style:true}); render(); toast(yes ? 'Settled. More like this.' : 'Settled. Claude will look at it on Sunday.');
+}
+function verdictWords(t){ return t.verdict==='y' ? 'You loved it' : t.verdict==='m' ? 'Not sure yet' : `Not for you${(t.off||[]).length ? ': '+t.off.map(k=>(OFF_TAGS.find(x=>x[0]===k)||[])[1].toLowerCase()).join(', ') : ''}`; }
 // Worth rendering: a look the app is least sure of. A push or rediscover day, or a main piece never worn.
 function worthTrying(o, date){
   if(!isoDate(date)) return false;
@@ -1989,21 +2001,22 @@ function tryResultBlock(){
   const prev = before ? `<p class="caption pad">You tried this on before. ${esc(verdictWords(before))}. A new picture is saved alongside it.</p>` : '';
   if(!tr.res) return `${prev}<div class="acts"><label class="btn" for="tryresult">Add the result</label><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
   return `<div class="try-res"><img src="${tr.res.preview}" alt="ChatGPT's try-on"></div>
-    <div class="rate" role="group" aria-label="Your verdict"><span class="label">This look</span><button type="button" class="label" data-tryv="1" aria-pressed="${tr.verdict===true}">Love it</button><button type="button" class="label" data-tryv="0" aria-pressed="${tr.verdict===false}">Not for me</button></div>
+    <div class="rate" role="group" aria-label="Your verdict"><span class="label">This look</span><button type="button" class="label" data-tryv="1" aria-pressed="${tr.verdict===true}">Love it</button><button type="button" class="label" data-tryv="m" aria-pressed="${tr.verdict==='m'}">Not sure yet</button><button type="button" class="label" data-tryv="0" aria-pressed="${tr.verdict===false}">Not for me</button></div>
     ${tr.verdict===false ? `<div class="field"><span class="cap">What's off?</span></div>${tagChips(OFF_TAGS, tr.off||[], 'data-tryoff')}` : ''}
     <div class="acts"><button type="button" class="btn" data-act="tryonsave">Save</button><label class="linkish" for="tryresult">Pick another</label><button type="button" class="linkish" data-act="tryclear">Remove</button><input type="file" id="tryresult" accept="image/*" class="sr"></div>`;
 }
 const refreshTry = () => { const el = $('#tryres'); if(el) el.innerHTML = tryResultBlock(); };
 async function saveTryon(){
   const tr = S.ui.try; if(!tr || !tr.res) return;
-  if(tr.verdict==null){ toast('Love it, or not for you?'); return; }
+  if(tr.verdict==null){ toast('Love it, not sure, or not for you?'); return; }
   const id = 'try-'+Date.now().toString(36), date = isoDate(tr.date) ? tr.date : TODAY;
-  const x = {id, added:Date.now(), updated:Date.now(), date, items:tr.items, verdict: tr.verdict ? 'y' : 'n', off: tr.verdict ? [] : (tr.off||[]), preview: tr.res.preview, f: tr.sc ? tr.sc.f : null};
+  const x = {id, added:Date.now(), updated:Date.now(), date, items:tr.items, verdict: tr.verdict==='m' ? 'm' : tr.verdict ? 'y' : 'n', off: tr.verdict===false ? (tr.off||[]) : [], preview: tr.res.preview, f: tr.sc ? tr.sc.f : null};
   if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, tr.res.b64, 'A try-on from ChatGPT'); x.photo = path; }catch(err){ toast(err.message); } }
   S.style.tryons = [x, ...(S.style.tryons||[])];
-  if(tr.sc){ S.style.ratings = (S.style.ratings||[]).concat([{date, items:tr.items, y:tr.verdict, mode:'tryon', src:'tryon', ref:id, f:tr.sc.f, at:Date.now()}]); learnFrom(tr.sc, tr.verdict, 0.04); }
-  if(tr.verdict) pinLook(date, tr.items);
-  queuePush({style:true}); closeSheet(); render(); toast(tr.verdict ? 'Saved. More like this.' : 'Saved. Claude will look at it on Sunday.');
+  // Not sure yet teaches the app nothing until you settle it.
+  if(tr.sc && tr.verdict!=='m'){ S.style.ratings = (S.style.ratings||[]).concat([{date, items:tr.items, y:tr.verdict, mode:'tryon', src:'tryon', ref:id, f:tr.sc.f, at:Date.now()}]); learnFrom(tr.sc, tr.verdict, 0.04); }
+  if(tr.verdict===true) pinLook(date, tr.items);
+  queuePush({style:true}); closeSheet(); render(); toast(tr.verdict==='m' ? 'Saved. Settle it when you know.' : tr.verdict ? 'Saved. More like this.' : 'Saved. Claude will look at it on Sunday.');
 }
 
 // Taking a picture out: hidden in the app at once, and the file is deleted from the private repo too.
@@ -2101,7 +2114,7 @@ document.addEventListener('click', async e=>{
     if(SHAPE[k].multi){ if(on && sib.filter(b=>b.getAttribute('aria-pressed')==='true').length>=2){ toast('Two at most'); return; } t.setAttribute('aria-pressed', on); }
     else { sib.forEach(b=>b.setAttribute('aria-pressed', 'false')); t.setAttribute('aria-pressed', on); }
     return; }
-  if(t.dataset.tryv!==undefined && S.ui.try){ const v = t.dataset.tryv==='1'; S.ui.try.verdict = S.ui.try.verdict===v ? null : v; refreshTry(); return; }
+  if(t.dataset.tryv!==undefined && S.ui.try){ const v = t.dataset.tryv==='1' ? true : t.dataset.tryv==='m' ? 'm' : false; S.ui.try.verdict = S.ui.try.verdict===v ? null : v; refreshTry(); return; }
   if(t.dataset.tryoff && S.ui.try){ const k = t.dataset.tryoff, a = S.ui.try.off||[]; S.ui.try.off = a.includes(k) ? a.filter(x=>x!==k) : [...a, k]; refreshTry(); return; }
   if(t.dataset.buycat || t.dataset.buycol || t.dataset.buypat){ const b = S.ui.buy; if(t.dataset.buycat) b.cat = t.dataset.buycat; if(t.dataset.buycol) b.colour = t.dataset.buycol; if(t.dataset.buypat) b.pattern = t.dataset.buypat; render(); return; }
   if(t.dataset.love){ toggleLove(t.dataset.love); return; }
@@ -2139,6 +2152,7 @@ document.addEventListener('click', async e=>{
     sheetTryOn(t.dataset.date); return;
   }
   if(act==='tryonsave'){ await saveTryon(); return; }
+  if(act==='decide'){ decideTryon(t.dataset.id, t.dataset.v==='1'); return; }
   if(act==='tryclear'){ if(S.ui.try){ S.ui.try.res = null; S.ui.try.verdict = null; S.ui.try.off = []; refreshTry(); } return; }
   if(act==='rmpic'){
     const key = 'pic/'+t.dataset.kind+'/'+t.dataset.id;
