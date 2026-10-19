@@ -177,7 +177,8 @@ function buildOutfit(date){
   function score(p, slot){
     let s = 0;
     s -= Math.abs((p.warmth||2) - target[slot]) * 1.1;
-    s -= Math.max(0, formal - (p.formality||2)) * 1.6;
+    // Trainers are fine on customer days; shoes get a lighter formality pull than clothes.
+    s -= Math.max(0, formal - (p.formality||2)) * (slot==='shoes' ? 0.5 : 1.6);
     if(o==='off') s -= Math.max(0, (p.formality||2) - 2) * 0.6;
     if(o==='customer' && p.statement) s += 0.8;
     const ago = recentDays(p.id);
@@ -266,7 +267,7 @@ function whyLine(o, date){
   if(warm && o.need>=3 && fabricOf(warm).name) bits.push(`${fabricOf(warm).name} for ${Math.round(o.temp)}°.`);
   else if(warm && o.need>=3) bits.push(`The ${warm.name.toLowerCase()} for ${Math.round(o.temp)}°.`);
   else if(o.need<=2) bits.push(`Light layers for ${Math.round(o.temp)}°.`);
-  if(o.occ==='customer') bits.push(o.slots.shoes && o.slots.shoes.formality>=2 ? 'Sharper shoes for the meeting.' : 'Dressed up a notch for the meeting.');
+  if(o.occ==='customer') bits.push('Dressed up a notch for the meeting.');
   return bits.join(' ');
 }
 
