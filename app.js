@@ -463,7 +463,12 @@ const SLOT_ORDER = ['outer','top','under','dress','bottom','belt','shoes','acces
 // Natalia always wears a t-shirt, short or long sleeved, under blazers, cardigans and cashmere jumpers.
 const layerTee = p => !!p && p.cat==='top' && ((p.shape==='tee' && !/vest|cami|halter|one-shoulder|waistcoat|satin|tie-front|blouse/i.test(p.name)) || /cotton turtleneck|long-sleeve/i.test(p.name));
 const needsTeeUnder = p => !!p && p.cat==='outer' && (p.shape==='blazer' || p.shape==='jumper');
-const isCashmere = p => !!p && p.cat==='top' && /cashmere/i.test((p.composition||'')+' '+(p.name||''));
+// Wool-family jumpers get a tee underneath. A jumper whose label isn't in yet is assumed to be wool;
+// roll-necks and other knits only once the label says wool.
+const WOOLLY = /wool|cashmere|merino|alpaca|mohair|angora|lambswool/i;
+const isCashmere = p => { if(!p || p.cat!=='top') return false; const c = (p.composition||'')+' '+(p.name||'');
+  if(WOOLLY.test(c)) return p.shape==='jumper' || p.shape==='knit' || /jumper|sweater|knit/i.test(p.name||'');
+  return p.shape==='jumper' && !(p.composition||'').trim(); };
 // Put a list of pieces into slots. A second top that is a plain tee goes underneath.
 function slotsFrom(ids){
   const slots = {};
