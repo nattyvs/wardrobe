@@ -369,7 +369,7 @@ function hueClose(a, b){
 function buildOne(date, opts){
   opts = opts || {};
   const scope = opts.scope !== undefined ? opts.scope : tripScope(date);
-  const o = opts.occ || occasionFor(date).occ, w = wx(date), t = w ? w.feel : 12, need = band(t);
+  const o = opts.occ || occasionFor(date).occ, w = wx(date), t = opts.feel!=null ? opts.feel : w ? w.feel : 12, need = band(t);
   const st = stats(date), R = rules();
   const pool = closet().filter(p=>!(opts.exclude && opts.exclude.has(p.id)) && usable(p, !!scope) && (scope ? scope.has(p.id) : (!p.occasions || !p.occasions.length || p.occasions.includes(o))));
   const recentDays = id => {
@@ -1746,6 +1746,7 @@ function sheetPiece(id){
       <dt>Fabric</dt><dd>${esc([f.name, f.note].filter(Boolean).join('. '))}</dd>
       <dt>Warmth</dt><dd>${warmW}${rules().warm[id]?' (adjusted by your reports)':''}</dd>
     </dl>
+    <div class="acts" style="padding-bottom:0"><button type="button" class="btn" data-act="lookswith" data-id="${esc(id)}">Outfits with this</button></div>
     <div class="stack">
       <div class="field"><span class="cap">Status</span></div>
       <div class="segs wrap" role="group" aria-label="Status">${Object.keys(STATUS).map(k=>`<button type="button" class="label" data-status="${k}" data-id="${esc(id)}" aria-pressed="${sx===k}">${STATUS_TAP[k]}</button>`).join('')}</div>
@@ -1763,6 +1764,47 @@ function sheetPiece(id){
       </div>
       <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savepiece" data-id="${esc(id)}">Save</button></div>
     </div>`);
+}
+// Outfits built around one piece: today's weather unless the piece is plainly for another season.
+function looksWith(id, round){
+  const p = piece(id); if(!p) return {looks:[], label:''};
+  const w = wx(TODAY), today = w ? w.feel : 12, wm = warmthOf(p);
+  let feel = today, label = `Dressed for today, ${today}°.`;
+  if(wm<=1 && today<16){ feel = 25; label = 'Dressed for a warm day, about 25°.'; }
+  else if(wm>=4 && today>18){ feel = 8; label = 'Dressed for a cold day, about 8°.'; }
+  const occs = p.occasions && p.occasions.length ? p.occasions : ['off'], todayOcc = occasionFor(TODAY).occ;
+  const occ = occs.includes(todayOcc) ? todayOcc : occs.includes('off') ? 'off' : occs[0];
+  const seen = new Set(), cands = [];
+  const add = (seed, exclude) => { const r = buildOne(TODAY, {hero:p, seed, feel, occ, scope:null, exclude});
+    const k = lookKey(r.slots); if(seen.has(k)) return; seen.add(k);
+    r.score = lookScore(r.slots, TODAY, {}); if(r.score.clash) return;
+    r.list = SLOT_ORDER.filter(x=>r.slots[x]).map(x=>({slot:x, p:r.slots[x]})); cands.push(r); };
+  // A previous round's looks are left out, so "Show me others" really shows others.
+  const shown = new Set((round ? (S.ui.withShown||[]) : []).flat());
+  for(let i=0; i<8; i++) add('w'+round+'-'+i, shown.size ? new Set([...shown].filter(x=>x!==id)) : undefined);
+  // Then leave out the best look's partners in turn, so the three really differ.
+  const firstBest = cands.slice().sort((a,b)=>b.score.total-a.score.total)[0];
+  if(firstBest) ['top','bottom','dress','outer','shoes'].forEach(k=>{ const q = firstBest.slots[k]; if(q && q.id!==id) for(let j=0;j<2;j++) add('x'+k+j+round, new Set([q.id, ...[...shown].filter(x=>x!==id)])); });
+  cands.sort((a,b)=>b.score.total-a.score.total);
+  // Three that differ from each other in at least two main pieces.
+  const main = r => ['outer','top','under','dress','bottom','shoes'].map(k=>r.slots[k] && r.slots[k].id).filter(Boolean);
+  const out = [];
+  cands.forEach(c=>{ if(out.length>=3) return; const m = main(c); if(out.every(o=>{ const om = main(o); return m.filter(x=>!om.includes(x)).length>=2; })) out.push(c); });
+  S.ui.withShown = (round ? (S.ui.withShown||[]) : []).concat(out.map(o=>main(o).filter(x=>x!==id)));
+  return {looks: out, label, occ};
+}
+function sheetWith(id, round){
+  const p = piece(id); if(!p) return;
+  const {looks, label, occ} = looksWith(id, round);
+  S.ui.withLooks = looks;
+  const card = (o, i) => `<li class="wl"><span class="thumbs">${o.list.map(({p:q})=>`<button type="button" class="th${q.id===id?' hero':''}" data-piece="${esc(q.id)}" aria-label="${esc(q.name)}">${art(q)}</button>`).join('')}</span>
+    <span class="names">${esc(o.list.map(({p:q})=>q.name).join(', '))}.</span>
+    <span class="sub">${esc([o.score.note.colour, o.score.note.silhouette].filter(Boolean).join(' '))}</span>
+    <span class="acts-inline"><button type="button" class="linkish" data-act="withtoday" data-i="${i}">Wear it today</button><button type="button" class="linkish" data-act="withtry" data-i="${i}">Try it on in ChatGPT</button></span></li>`;
+  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Outfits with this</span><button type="button" class="linkish" data-close>Done</button></div>
+    <div class="with-head"><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(label)} ${esc(OCC[occ]||'')} looks.</span></span></div>
+    ${looks.length ? `<ul class="withlooks">${looks.map(card).join('')}</ul>` : `<p class="caption pad">Nothing convincing came together around this piece. It may be one to look at in Get more from it.</p>`}
+    <div class="acts"><button type="button" class="btn ghost" data-act="withmore" data-id="${esc(id)}" data-round="${(round||0)+1}">Show me others</button></div>`);
 }
 function sheetSwap(date){
   const o = outfitFor(date), scope = tripScope(date);
@@ -2041,6 +2083,9 @@ document.addEventListener('click', async e=>{
   }
   if(act==='tryonsave'){ await saveTryon(); return; }
   if(act==='markdormant'){ sheetDormant(); return; }
+  if(act==='lookswith' || act==='withmore'){ t.textContent = 'Putting looks together…'; t.disabled = true; const id = t.dataset.id, r = act==='withmore' ? +t.dataset.round : 0; setTimeout(()=>sheetWith(id, r), 30); return; }
+  if(act==='withtry'){ const o = (S.ui.withLooks||[])[+t.dataset.i]; if(o) sheetTryOn('look', o); return; }
+  if(act==='withtoday'){ const o = (S.ui.withLooks||[])[+t.dataset.i]; if(!o) return; pinLook(TODAY, o.list.map(x=>x.p.id)); closeSheet(); location.hash = '#today'; render(); toast('Today’s look'); return; }
   if(act==='wearsoon'){ S.state.wearSoon[t.dataset.id] = TODAY; S.ui.memo = {}; queuePush({state:true}); render(); toast('It will come up in this week’s looks'); return; }
   if(act==='keepit'){ S.state.dormant[t.dataset.id] = null; queuePush({state:true}); render(); toast('Kept, and off this list'); return; }
   if(act==='letgo'){ const k = 'letgo/'+t.dataset.id; if(S.ui.confirmRm!==k){ S.ui.confirmRm = k; t.textContent = 'Tap again to mark for donating'; return; } S.ui.confirmRm = null; setStatus(t.dataset.id, 'donate'); return; }
