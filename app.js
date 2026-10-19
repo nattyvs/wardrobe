@@ -20,6 +20,7 @@ const S = {
   trips: cache.trips || [],
   palette: cache.palette || null,
   style: Object.assign({loves:{}, looks:[], inspo:[], rules:[]}, cache.style || {}),
+  vision: cache.vision || {entries:[], corrections:{}},
   tripwx: LS.get('wd.tripwx', {}),
   weather: LS.get('wd.weather', null),
   sha: cache.sha || {},
@@ -27,7 +28,7 @@ const S = {
   photos: {},
   ui: {memo:{}, rules:null}
 };
-function persist(){ S.ui.memo = {}; S.ui.rules = null; LS.set('wd.cache', {closet:S.closet, log:S.log, plan:S.plan, state:S.state, trips:S.trips, palette:S.palette, style:S.style, sha:S.sha, synced:S.synced}); }
+function persist(){ S.ui.memo = {}; S.ui.rules = null; LS.set('wd.cache', {closet:S.closet, log:S.log, plan:S.plan, state:S.state, trips:S.trips, palette:S.palette, style:S.style, vision:S.vision, sha:S.sha, synced:S.synced}); }
 function saveSettings(){ LS.set('wd.settings', settings); }
 
 /* ---------------- dates ---------------- */
@@ -934,7 +935,7 @@ async function loadPhoto(path){
 loadPhoto.busy = {};
 async function pull(){
   if(!ghReady()) return;
-  const files = {closet:'data/closet.json', log:'data/wearlog.json', plan:'data/plan.json', state:'data/state.json', trips:'data/trips.json', palette:'data/palette.json', style:'data/style.json'};
+  const files = {closet:'data/closet.json', log:'data/wearlog.json', plan:'data/plan.json', state:'data/state.json', trips:'data/trips.json', palette:'data/palette.json', style:'data/style.json', vision:'data/vision.json'};
   const out = {};
   for(const [k,p] of Object.entries(files)){ const r = await ghGet(p); S.sha[p] = r.sha; out[k] = r.data; }
   if(out.closet && out.closet.pieces) S.closet = out.closet.pieces.map(p=>Object.assign({}, p, S.state.edits[p.id]||{}));
@@ -955,6 +956,7 @@ async function pull(){
     S.trips = Object.values(byId).filter(t=>!t.deleted);
   }
   if(out.palette && out.palette.best) S.palette = out.palette;
+  if(out.vision){ const m = {}; (out.vision.entries||[]).forEach(e=>m[e.id]=e); (S.vision.entries||[]).forEach(e=>{ if(!m[e.id]) m[e.id]=e; }); S.vision = {entries:Object.values(m).sort((a,b)=>(b.at||0)-(a.at||0)).slice(0,200), corrections: out.vision.corrections || {}}; }
   if(out.style){
     // Loves: a local untap is kept as null so an old copy can't bring it back. Looks and pictures merge by id.
     S.style.loves = Object.assign({}, out.style.loves||{}, S.style.loves);
@@ -978,6 +980,7 @@ function queuePush(what){
       if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes}, 'Update day settings');
       if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
       if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
+      if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
       if(w.style){ const cur = await ghGet('data/style.json'); S.sha['data/style.json'] = cur.sha; if(cur.data && cur.data.rules) S.style.rules = cur.data.rules; await ghPut('data/style.json', S.style, 'Update style notes'); } // rules are Claude's, so keep whatever is on GitHub
       S.synced = Date.now(); persist();
     }catch(e){ toast(e.message || 'Saved here. Will sync later.'); }
@@ -1235,6 +1238,91 @@ function viewSettings(){
   </div>`;
 }
 
+/* ---------------- vision: a small image model that runs on the phone ----------------
+   CLIP, through transformers.js, loaded only when first used. It compares pictures with the closet cut-outs.
+   It suggests; it never decides. Claude checks its matches in the Sunday review and writes corrections. */
+const VISION_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
+const VISION_MODEL = 'Xenova/clip-vit-base-patch32';
+const V = {lib:null, proc:null, model:null, loading:null, busy:'', progress:''};
+async function visionReady(){
+  if(V.model) return true;
+  if(!V.loading) V.loading = (async()=>{
+    V.busy = 'Downloading the vision model (about 90 MB, once)…'; render();
+    const lib = await import(VISION_LIB);
+    lib.env.allowLocalModels = false;
+    V.lib = lib;
+    V.proc = await lib.AutoProcessor.from_pretrained(VISION_MODEL);
+    V.model = await lib.CLIPVisionModelWithProjection.from_pretrained(VISION_MODEL);
+    V.busy = ''; return true;
+  })().catch(e=>{ V.loading = null; V.busy = ''; throw new Error("The vision model couldn't load: "+(e && e.message || e)); });
+  return V.loading;
+}
+// Cut-outs are transparent, so put every picture on white first. Optional crop as fractions [y0, y1].
+async function whiteBlob(src, crop){
+  const img = await createImageBitmap(src);
+  const y0 = crop ? Math.round(img.height*crop[0]) : 0, h = crop ? Math.round(img.height*(crop[1]-crop[0])) : img.height;
+  const k = Math.min(1, 448/Math.max(img.width, h)), cv = document.createElement('canvas');
+  cv.width = Math.round(img.width*k); cv.height = Math.round(h*k);
+  const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0,0,cv.width,cv.height); cx.drawImage(img, 0, y0, img.width, h, 0, 0, cv.width, cv.height);
+  return new Promise(r=>cv.toBlob(r, 'image/jpeg', .9));
+}
+async function embedBlob(blob){
+  const image = await V.lib.RawImage.fromBlob(blob);
+  const inputs = await V.proc(image);
+  const { image_embeds } = await V.model(inputs);
+  const v = Array.from(image_embeds.data); const n = Math.hypot(...v) || 1;
+  return v.map(x=>x/n);
+}
+const f32ToB64 = a => { const b = new Uint8Array(new Float32Array(a).buffer); let s=''; for(let i=0;i<b.length;i+=0x8000) s += String.fromCharCode.apply(null, b.subarray(i,i+0x8000)); return btoa(s); };
+const b64ToF32 = s => Array.from(new Float32Array(Uint8Array.from(atob(s), c=>c.charCodeAt(0)).buffer));
+function embStore(){ const e = LS.get('wd.emb', null); return e && e.model===VISION_MODEL ? e : {model:VISION_MODEL, items:{}}; }
+// Teach the model the closet: one embedding per piece, kept on this phone and redone only when a photo changes.
+async function closetEmbeddings(){
+  await visionReady();
+  const store = embStore(), todo = closet().filter(p=>p.photo && (!store.items[p.id] || store.items[p.id].photo!==p.photo));
+  let i = 0;
+  for(const p of todo){
+    i++; V.busy = `Looking at your closet: ${i} of ${todo.length}`; if(i%5===1) render();
+    try{
+      const r = await fetch(ghURL(p.photo), {headers:ghHeaders({Accept:'application/vnd.github.raw'})}); if(!r.ok) continue;
+      const v = await embedBlob(await whiteBlob(await r.blob()));
+      store.items[p.id] = {photo:p.photo, v:f32ToB64(v)};
+      if(i%10===0) LS.set('wd.emb', store);
+    }catch(e){}
+  }
+  LS.set('wd.emb', store); V.busy = '';
+  const out = {}; Object.entries(store.items).forEach(([id, x])=>{ if(piece(id)) out[id] = b64ToF32(x.v); }); return out;
+}
+const dot = (a,b) => { let s = 0; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; };
+function wrongFor(ref){ const c = S.vision && S.vision.corrections && S.vision.corrections[ref]; return new Set(c && c.wrong || []); }
+// Upper part of a picture for tops and coats, lower part for bottoms and shoes, the whole for dresses.
+async function matchPicture(file, ref){
+  const E = await closetEmbeddings();
+  V.busy = 'Comparing…'; render();
+  const q = {whole: await embedBlob(await whiteBlob(file)), upper: await embedBlob(await whiteBlob(file, [0, .55])), lower: await embedBlob(await whiteBlob(file, [.45, 1]))};
+  const region = {outer:'upper', top:'upper', dress:'whole', bottom:'lower', shoes:'lower', accessory:'whole', bag:'whole'};
+  const wrong = wrongFor(ref), byCat = {};
+  closet().forEach(p=>{ if(!E[p.id] || wrong.has(p.id)) return; const s = dot(E[p.id], q[region[p.cat]||'whole']); (byCat[p.cat] = byCat[p.cat] || []).push({id:p.id, sim:Math.round(s*1000)/1000}); });
+  Object.values(byCat).forEach(a=>a.sort((x,y)=>y.sim-x.sim));
+  const overall = closet().filter(p=>E[p.id] && !wrong.has(p.id)).map(p=>({id:p.id, sim:Math.round(dot(E[p.id], q.whole)*1000)/1000})).sort((a,b)=>b.sim-a.sim).slice(0,6);
+  V.busy = '';
+  return {byCat: Object.fromEntries(Object.entries(byCat).map(([k,a])=>[k, a.slice(0,3)])), overall};
+}
+function logVision(entry){ S.vision = S.vision || {entries:[], corrections:{}}; S.vision.entries = [entry, ...(S.vision.entries||[])].slice(0,200); queuePush({vision:true}); }
+async function runInspoMatch(id){
+  const x = (S.style.inspo||[]).find(y=>y.id===id); if(!x || !x.preview) return;
+  try{
+    const blob = await (await fetch(x.preview)).blob();
+    const r = await matchPicture(blob, id);
+    x.matches = {byCat:r.byCat, at:Date.now()}; x.updated = Date.now();
+    logVision({id:'v-'+Date.now().toString(36), at:Date.now(), kind:'inspo', ref:id, byCat:r.byCat});
+    queuePush({style:true});
+  }catch(err){ V.busy = ''; toast(err.message || 'The vision model failed.'); }
+  if(route().name==='style') render();
+}
+const simWord = s => s>=.92 ? 'Very close' : s>=.85 ? 'Close' : s>=.78 ? 'Similar' : 'Loosely similar';
+function matchRow(ms){ return `<span class="vm">${ms.map(m=>{ const p = piece(m.id); return p ? `<button type="button" class="vm-i" data-piece="${esc(p.id)}" aria-label="${esc(p.name)}, ${simWord(m.sim).toLowerCase()}"><span class="th">${art(p)}</span><small>${simWord(m.sim)}</small></button>` : ''; }).join('')}</span>`; }
+
 /* ---------------- style: what Natalia likes ---------------- */
 const LOVE_WHY = [['colour','The colour'],['fit','The fit'],['fabric','The fabric'],['feel','How I feel in it'],['compliments','Compliments'],['easy','Easy to wear']];
 const LOOK_TAGS = [['me','Felt like me'],['compliments','Got compliments'],['colours','The colours'],['proportions','The proportions'],['layers','The layering'],['comfort','Comfortable'],['sharp','Sharp for work']];
@@ -1267,7 +1355,13 @@ function viewStyle(arg){
   const loveGrid = loves.length ? `<div class="grid">${loves.map(p=>`<div class="tile"><button type="button" class="item" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name)}</span><span class="st">${esc(whyLine(p) || 'Loved')}</span></button>${loveBtn(p.id)}</div>`).join('')}</div>` : `<p class="empty">Nothing yet. Tap the heart on a piece in the Closet, or open it and say why you love it.</p>`;
   const lookRow = l => { const ps = (l.items||[]).map(piece).filter(Boolean);
     return `<li><span class="lk-ph">${l.preview?`<img src="${l.preview}" alt="">`:''}</span><span class="lk-body"><span class="thumbs">${ps.map(p=>`<span>${art(p)}</span>`).join('')}</span><span class="sub">${esc([OCC[l.occ]||'', ...(l.tags||[]).map(k=>(LOOK_TAGS.find(x=>x[0]===k)||[])[1])].filter(Boolean).join(' · '))}</span>${l.note?`<span class="note">${esc(l.note)}</span>`:''}</span><button type="button" class="linkish rm" data-act="rmstyle" data-kind="looks" data-id="${esc(l.id)}">Remove</button></li>`; };
-  const inspoCard = x => `<li><span class="in-ph">${x.preview?`<img src="${x.preview}" alt="">`:`<span class="in-link">Link</span>`}</span><span class="sub">${esc((x.tags||[]).map(k=>(INSPO_TAGS.find(y=>y[0]===k)||[])[1]).filter(Boolean).join(' · ') || 'Saved')}</span>${x.note?`<span class="note">${esc(x.note)}</span>`:''}${x.url?`<a class="linkish" href="${esc(x.url)}" target="_blank" rel="noopener">Open link</a>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="inspo" data-id="${esc(x.id)}">Remove</button></li>`;
+  const inspoMatches = x => {
+    if(!x.preview) return '';
+    if(!x.matches) return `<button type="button" class="linkish" data-act="inspomatch" data-id="${esc(x.id)}">Find it in my closet</button>`;
+    const wrong = wrongFor(x.id), best = ['top','outer','dress','bottom','shoes'].map(c=>((x.matches.byCat||{})[c]||[]).find(m=>!wrong.has(m.id))).filter(m=>m && m.sim>=.75).sort((a,b)=>b.sim-a.sim).slice(0,4);
+    return best.length ? `<span class="cap vm-cap">Closest in your closet</span>${matchRow(best)}` : `<span class="sub">Nothing in your closet is close.</span>`;
+  };
+  const inspoCard = x => `<li><span class="in-ph">${x.preview?`<img src="${x.preview}" alt="">`:`<span class="in-link">Link</span>`}</span><span class="sub">${esc((x.tags||[]).map(k=>(INSPO_TAGS.find(y=>y[0]===k)||[])[1]).filter(Boolean).join(' · ') || 'Saved')}</span>${x.note?`<span class="note">${esc(x.note)}</span>`:''}${inspoMatches(x)}${x.url?`<a class="linkish" href="${esc(x.url)}" target="_blank" rel="noopener">Open link</a>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="inspo" data-id="${esc(x.id)}">Remove</button></li>`;
   return `${masthead()}
   <header class="pagehead"><h1 class="page">Style</h1><p class="lede">Show the app what you love, so the looks start to sound like you. Claude reads everything here and writes your rules.</p></header>
   <section class="group"><h2 class="sec">Pieces I love <span class="n">${loves.length}</span></h2>${loveGrid}</section>
@@ -1277,6 +1371,11 @@ function viewStyle(arg){
   <section class="panel"><span class="cap">Inspiration</span><p class="caption pad">Screenshots and links from anywhere. Say what caught your eye.</p>
     ${ins.length?`<ul class="inspo">${ins.map(inspoCard).join('')}</ul>`:''}
     <div class="acts"><a class="btn" href="#style/inspo">Add a picture</a></div></section>
+  <section class="panel"><span class="cap">Do I already own this?</span><p class="caption pad">Before you buy, snap the piece. The app shows what in your closet looks most like it.</p>
+    ${S.ui.own ? `<div class="own pad"><img src="${S.ui.own.preview}" alt="The piece you checked">${S.ui.own.overall ? matchRow(S.ui.own.overall.slice(0,4)) : ''}</div>${S.ui.own.overall ? `<p class="caption pad">${S.ui.own.overall[0] && S.ui.own.overall[0].sim>=.9 ? `You own something very like this: the ${esc((piece(S.ui.own.overall[0].id)||{}).name||'').toLowerCase()}.` : S.ui.own.overall[0] && S.ui.own.overall[0].sim>=.84 ? 'You have something close. Worth a look before buying.' : 'Nothing very like it in your closet.'}</p>` : ''}` : ''}
+    ${V.busy?`<p class="caption pad busy">${esc(V.busy)}</p>`:''}
+    <div class="acts"><label class="btn" for="ownphoto">Check a photo</label><input type="file" id="ownphoto" accept="image/*" class="sr"></div>
+    <p class="caption pad">Runs on your phone. The first time it downloads a vision model, about 90 MB, then looks at each of your pieces once.</p></section>
   <section class="panel"><span class="cap">What Claude has learned</span>
     ${rulesL.length?`<ul class="learned">${rulesL.map(r=>`<li>${esc(typeof r==='string'?r:r.text)}</li>`).join('')}</ul>`:`<p class="caption pad">Nothing yet. Once you've added a few loves, looks and pictures, ask Claude to read them. Your style rules will appear here and shape the daily looks.</p>`}</section>`;
 }
@@ -1688,7 +1787,9 @@ document.addEventListener('click', async e=>{
     if(d.photo){ x.preview = d.photo.preview; if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, d.photo.b64, 'Inspiration'); x.photo = path; }catch(err){ toast(err.message); } } }
     S.style.inspo = [x, ...(S.style.inspo||[])]; S.ui.inspo = null;
     queuePush({style:true}); location.hash = '#style'; toast('Saved');
+    if(x.preview) runInspoMatch(x.id);
   }
+  else if(act==='inspomatch'){ runInspoMatch(t.dataset.id); }
   else if(act==='cancelstyle'){ S.ui.look = null; S.ui.inspo = null; S.ui.lookCat = null; location.hash = '#style'; }
   else if(act==='rmstyle'){
     const key = t.dataset.kind+'/'+t.dataset.id;
@@ -1752,6 +1853,13 @@ document.addEventListener('change', async e=>{
   if(el.dataset.pack){ togglePack(el.dataset.trip, el.dataset.pack, el.checked); return; }
   if(el.dataset.lookpick && S.ui.look){ const d = S.ui.look, id = el.dataset.lookpick; d.items = el.checked ? [...new Set([...d.items, id])] : d.items.filter(x=>x!==id); render(); return; }
   if(el.id==='plove'){ toggleLove(el.dataset.id); return; }
+  if(el.id==='ownphoto' && el.files[0]){
+    const f = el.files[0], ph = await readPhoto(f); if(!ph){ toast("That photo couldn't be read."); return; }
+    S.ui.own = {preview: ph.preview}; render();
+    try{ const r = await matchPicture(f, null); S.ui.own.overall = r.overall; logVision({id:'v-'+Date.now().toString(36), at:Date.now(), kind:'own', overall:r.overall, byCat:r.byCat}); }
+    catch(err){ V.busy = ''; toast(err.message || 'The vision model failed.'); }
+    render(); return;
+  }
   if((el.id==='lookphoto' || el.id==='inspophoto') && el.files[0]){
     const ph = await readPhoto(el.files[0]); if(!ph){ toast("That photo couldn't be read."); return; }
     (el.id==='lookphoto' ? S.ui.look : S.ui.inspo).photo = ph; render(); toast('Photo added'); return;
