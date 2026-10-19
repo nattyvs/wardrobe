@@ -1153,6 +1153,7 @@ function viewDay(date, settle){
     <p class="why">${esc(whyLine(o, date))}</p>
     ${fnote?`<p class="caption facenote">${esc(fnote)}</p>`:''}
     ${o.adjusted?`<p class="adjusted">${esc(o.adjusted)}</p>`:''}
+    ${(()=>{ const m = weatherMismatch(o, date); return m && S.state.swaps[date] ? `<p class="adjusted">${esc(m)} <button type="button" class="linkish" data-act="rebuildday" data-date="${date}">Build one for today's weather</button></p>` : ''; })()}
     ${o.fallback?`<p class="caption">${esc(o.fallback)}</p>`:''}
   </div>
   ${!o.logged && !o.fromPlan && !o.scope ? `<div class="modes segs" role="group" aria-label="Kind of look">${Object.entries(MODES).map(([k,l])=>`<button type="button" class="label" data-mode="${k}" data-date="${date}" aria-pressed="${k===(o.mode||modeFor(date))}">${l}</button>`).join('')}</div>` : ''}
@@ -1884,7 +1885,7 @@ function looksWith(id, round){
   const out = [];
   cands.forEach(c=>{ if(out.length>=3) return; const m = main(c); if(out.every(o=>{ const om = main(o); return m.filter(x=>!om.includes(x)).length>=2; })) out.push(c); });
   S.ui.withShown = (round ? (S.ui.withShown||[]) : []).concat(out.map(o=>main(o).filter(x=>x!==id)));
-  return {looks: out, label, occ};
+  return {looks: out, label, occ, today: feel===today};
 }
 // The day page's flat lay in miniature: pieces close together, in the same places.
 function miniLay(o, heroId){
@@ -1892,9 +1893,19 @@ function miniLay(o, heroId){
   return `<div class="mini-lay" role="img" aria-label="${esc(o.list.map(({p})=>p.name).join(', '))}">${o.list.map(({slot,p})=>{ const pos = L[slot] || LAYOUT[slot]; if(!pos) return '';
     return `<span class="piece slot-${slot}${p.id===heroId?' hero-piece':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;z-index:${pos.z||1}">${art(p)}</span>`; }).join('')}</div>`;
 }
+// A pinned or planned look that plainly doesn't suit the forecast says so, with a way out.
+function weatherMismatch(o, date){
+  const w = wx(date); if(!w || !o.list || !o.list.length || o.logged) return '';
+  const t = w.feel, sl = o.slots, shorts = sl.bottom && /shorts/i.test(sl.bottom.name||'');
+  const light = (sl.top && warmthOf(sl.top)<=1) || (sl.dress && warmthOf(sl.dress)<=1);
+  if(t<14 && !sl.outer && (shorts || light)) return `This look is for warmer weather than ${t}°${w.rainChance>=60?' and rain':''}.`;
+  if(t<10 && shorts) return `Shorts at ${t}° is a stretch.`;
+  if(t>=20 && ((sl.outer && warmthOf(sl.outer)>=4) || (sl.top && warmthOf(sl.top)>=4))) return `This look is warm for ${t}°.`;
+  return '';
+}
 async function sheetWith(id, round){
   const p = piece(id); if(!p) return;
-  const {looks, label, occ} = looksWith(id, round);
+  const {looks, label, occ, today} = looksWith(id, round);
   // The sheet doesn't redraw when a photo arrives, so fetch them all first (a few seconds at most).
   const paths = [...new Set(looks.flatMap(o=>o.list.map(x=>x.p.photo)).concat(p.photo).filter(x=>x && !S.photos[x]))];
   if(paths.length && ghReady()) await Promise.race([Promise.all(paths.map(photoURL)), new Promise(r=>setTimeout(r, 6000))]);
@@ -1902,7 +1913,7 @@ async function sheetWith(id, round){
   const card = (o, i) => `<li class="wl">${miniLay(o, id)}
     <span class="names">${esc(o.list.map(({p:q})=>q.name).join(', '))}.</span>
     <span class="sub">${esc([o.score.note.colour, o.score.note.silhouette].filter(Boolean).join(' '))}</span>
-    <span class="acts-inline"><button type="button" class="linkish" data-act="withtoday" data-i="${i}">Wear it today</button><button type="button" class="linkish" data-act="withtry" data-i="${i}">Try it on in ChatGPT</button></span></li>`;
+    <span class="acts-inline">${today ? `<button type="button" class="linkish" data-act="withtoday" data-i="${i}">Wear it today</button>` : ''}<button type="button" class="linkish" data-act="withtry" data-i="${i}">Try it on in ChatGPT</button></span></li>`;
   openSheet(`<div class="bar"><button type="button" class="linkish back" data-act="backpiece" data-id="${esc(id)}" aria-label="Back to ${esc(p.name)}">&#8249; Back</button><span class="cap" id="sheetTitle">Outfits with this</span><button type="button" class="linkish" data-close>Done</button></div>
     <div class="with-head"><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(label)} ${esc(OCC[occ]||'')} looks.</span></span></div>
     ${looks.length ? `<ul class="withlooks">${looks.map(card).join('')}</ul>` : `<p class="caption pad">Nothing convincing came together around this piece. It may be one to look at in Get more from it.</p>`}
@@ -2087,7 +2098,8 @@ async function saveTryon(){
   S.style.tryons = [x, ...(S.style.tryons||[])];
   // Not sure yet teaches the app nothing until you settle it.
   if(tr.sc && tr.verdict!=='m'){ S.style.ratings = (S.style.ratings||[]).concat([{date, items:tr.items, y:tr.verdict, mode:'tryon', src:'tryon', ref:id, f:tr.sc.f, at:Date.now()}]); learnFrom(tr.sc, tr.verdict, 0.04); }
-  if(tr.verdict===true) pinLook(date, tr.items);
+  // Only a try-on of a real day's look is pinned to that day. Others (a piece's outfits, office ideas) are just saved.
+  if(tr.verdict===true && isoDate(tr.date)) pinLook(date, tr.items);
   queuePush({style:true}); closeSheet(); render(); toast(tr.verdict==='m' ? 'Saved. Settle it when you know.' : tr.verdict ? 'Saved. More like this.' : 'Saved. Claude will look at it on Sunday.');
 }
 
@@ -2244,6 +2256,7 @@ document.addEventListener('click', async e=>{
     S.ui.confirmRm = null; removeWornPhoto(d); render(); toast('Photo removed'); return;
   }
   if(act==='markdormant'){ sheetDormant(); return; }
+  if(act==='rebuildday'){ delete S.state.swaps[t.dataset.date]; S.ui.memo = {}; queuePush({state:true}); render(); toast('Rebuilt for the weather'); return; }
   if(act==='opendrawer'){ S.ui.drawer = true; S.ui.drawerJust = true; render(); requestAnimationFrame(()=>requestAnimationFrame(()=>{ S.ui.drawerJust = false; const d = document.querySelector('.cdrawer'); if(d) d.classList.add('open'); })); return; }
   if(act==='closedrawer'){ S.ui.drawer = false; const d = document.querySelector('.cdrawer'), sc = document.querySelector('.cscrim'); if(d) d.classList.remove('open'); if(sc) sc.classList.remove('open'); setTimeout(render, 260); return; }
   if(act==='clearfilters'){ S.ui.cf = {type:closetFilters().type, kind:null, colours:[], q:''}; if((S.ui.closetFilter||'all')!=='all'){ location.hash = '#closet'; } render(); return; }
