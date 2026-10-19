@@ -20,7 +20,7 @@ const S = {
   trips: cache.trips || [],
   palette: cache.palette || null,
   style: Object.assign({loves:{}, looks:[], inspo:[], rules:[]}, cache.style || {}),
-  vision: cache.vision || {entries:[], corrections:{}},
+  vision: Object.assign({entries:[], corrections:{}, feedback:[]}, cache.vision||{}),
   tripwx: LS.get('wd.tripwx', {}),
   weather: LS.get('wd.weather', null),
   sha: cache.sha || {},
@@ -961,7 +961,7 @@ async function pull(){
     S.trips = Object.values(byId).filter(t=>!t.deleted);
   }
   if(out.palette && out.palette.best) S.palette = out.palette;
-  if(out.vision){ const m = {}; (out.vision.entries||[]).forEach(e=>m[e.id]=e); (S.vision.entries||[]).forEach(e=>{ if(!m[e.id]) m[e.id]=e; }); S.vision = {entries:Object.values(m).sort((a,b)=>(b.at||0)-(a.at||0)).slice(0,200), corrections: out.vision.corrections || {}}; }
+  if(out.vision){ const m = {}; (out.vision.entries||[]).forEach(e=>m[e.id]=e); (S.vision.entries||[]).forEach(e=>{ if(!m[e.id]) m[e.id]=e; }); const fm = {}; [...(out.vision.feedback||[]), ...(S.vision.feedback||[])].forEach(f=>fm[f.id]=f); S.vision = {entries:Object.values(m).sort((a,b)=>(b.at||0)-(a.at||0)).slice(0,200), corrections: out.vision.corrections || {}, feedback:Object.values(fm).sort((a,b)=>a.at-b.at).slice(-150)}; }
   if(out.style){
     // Loves: a local untap is kept as null so an old copy can't bring it back. Looks and pictures merge by id.
     S.style.loves = Object.assign({}, out.style.loves||{}, S.style.loves);
@@ -985,7 +985,7 @@ function queuePush(what){
       if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes}, 'Update day settings');
       if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
       if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
-      if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
+      if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; if(cur.data && cur.data.feedback){ const fm = {}; [...cur.data.feedback, ...(S.vision.feedback||[])].forEach(f=>fm[f.id]=f); S.vision.feedback = Object.values(fm).sort((a,b)=>a.at-b.at).slice(-150); } await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
       if(w.style){ const cur = await ghGet('data/style.json'); S.sha['data/style.json'] = cur.sha; if(cur.data && cur.data.rules) S.style.rules = cur.data.rules; await ghPut('data/style.json', S.style, 'Update style notes'); } // rules are Claude's, so keep whatever is on GitHub
       S.synced = Date.now(); persist();
     }catch(e){ toast(e.message || 'Saved here. Will sync later.'); }
@@ -1299,21 +1299,53 @@ async function closetEmbeddings(){
   const out = {}; Object.entries(store.items).forEach(([id, x])=>{ if(piece(id)) out[id] = b64ToF32(x.v); }); return out;
 }
 const dot = (a,b) => { let s = 0; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; };
-function wrongFor(ref){ const c = S.vision && S.vision.corrections && S.vision.corrections[ref]; return new Set(c && c.wrong || []); }
+const REGION = {outer:'upper', top:'upper', dress:'whole', bottom:'lower', shoes:'lower', accessory:'whole', bag:'whole', belt:'whole'};
+// Her right/wrong taps. The latest tap on a piece for a picture wins.
+function tapsFor(ref){
+  const m = {}; (S.vision.feedback||[]).filter(f=>f.ref===ref).sort((a,b)=>a.at-b.at).forEach(f=>m[f.piece]=f.ok); return m;
+}
+function wrongFor(ref){
+  const c = S.vision && S.vision.corrections && S.vision.corrections[ref], out = new Set(c && c.wrong || []);
+  Object.entries(tapsFor(ref)).forEach(([id, ok])=>{ if(ok===false) out.add(id); else out.delete(id); });
+  return out;
+}
+// The query pictures, kept on this phone so a tap can teach the app what the picture looked like.
+const vqStore = () => LS.get('wd.vq', {});
+function keepQuery(ref, q){ const st = vqStore(); st[ref] = {at:Date.now(), q:{whole:f32ToB64(q.whole), upper:f32ToB64(q.upper), lower:f32ToB64(q.lower)}}; const keys = Object.keys(st).sort((a,b)=>st[b].at-st[a].at); keys.slice(40).forEach(k=>delete st[k]); LS.set('wd.vq', st); }
+function learnedTaps(){
+  if(V.taps && V.taps.n===(S.vision.feedback||[]).length) return V.taps.list;
+  const list = (S.vision.feedback||[]).filter(f=>f.q).map(f=>({piece:f.piece, ok:f.ok, region:f.region||'whole', v:b64ToF32(f.q)}));
+  V.taps = {n:(S.vision.feedback||[]).length, list}; return list;
+}
+// A right tap adds that picture as another view of the piece. A wrong tap pushes the piece down for pictures like it.
+function adjust(id, base, q){
+  let s = base;
+  learnedTaps().forEach(t=>{ if(t.piece!==id) return; const d = dot(t.v, q[t.region]);
+    if(t.ok) s = Math.max(s, d*.98); else if(d>.85) s -= (d-.85); });
+  return Math.min(.999, s);
+}
 // Upper part of a picture for tops and coats, lower part for bottoms and shoes, the whole for dresses.
 async function matchPicture(file, ref){
   const E = await closetEmbeddings();
   V.busy = 'Comparing…'; render();
   const q = {whole: await embedBlob(await whiteBlob(file)), upper: await embedBlob(await whiteBlob(file, [0, .55])), lower: await embedBlob(await whiteBlob(file, [.45, 1]))};
-  const region = {outer:'upper', top:'upper', dress:'whole', bottom:'lower', shoes:'lower', accessory:'whole', bag:'whole'};
+  if(ref) keepQuery(ref, q);
   const wrong = wrongFor(ref), byCat = {};
-  closet().forEach(p=>{ if(!E[p.id] || wrong.has(p.id)) return; const s = dot(E[p.id], q[region[p.cat]||'whole']); (byCat[p.cat] = byCat[p.cat] || []).push({id:p.id, sim:Math.round(s*1000)/1000}); });
+  closet().forEach(p=>{ if(!E[p.id] || wrong.has(p.id)) return; const r = REGION[p.cat]||'whole', s = adjust(p.id, dot(E[p.id], q[r]), q); (byCat[p.cat] = byCat[p.cat] || []).push({id:p.id, sim:Math.round(s*1000)/1000}); });
   Object.values(byCat).forEach(a=>a.sort((x,y)=>y.sim-x.sim));
-  const overall = closet().filter(p=>E[p.id] && !wrong.has(p.id)).map(p=>({id:p.id, sim:Math.round(dot(E[p.id], q.whole)*1000)/1000})).sort((a,b)=>b.sim-a.sim).slice(0,6);
+  const overall = closet().filter(p=>E[p.id] && !wrong.has(p.id)).map(p=>({id:p.id, sim:Math.round(adjust(p.id, dot(E[p.id], q.whole), q)*1000)/1000})).sort((a,b)=>b.sim-a.sim).slice(0,8);
   V.busy = '';
-  return {byCat: Object.fromEntries(Object.entries(byCat).map(([k,a])=>[k, a.slice(0,3)])), overall};
+  return {byCat: Object.fromEntries(Object.entries(byCat).map(([k,a])=>[k, a.slice(0,4)])), overall};
 }
-function logVision(entry){ S.vision = S.vision || {entries:[], corrections:{}}; S.vision.entries = [entry, ...(S.vision.entries||[])].slice(0,200); queuePush({vision:true}); }
+function tapMatch(ref, id, ok, region){
+  const prev = tapsFor(ref)[id];
+  const st = vqStore()[ref], f = {id:'f-'+Date.now().toString(36), at:Date.now(), ref, piece:id, ok: prev===ok ? null : ok, region};
+  if(st && st.q && st.q[region] && f.ok!==null) f.q = st.q[region];
+  S.vision.feedback = [...(S.vision.feedback||[]), f].slice(-150);
+  queuePush({vision:true});
+  return f.ok;
+}
+function logVision(entry){ S.vision = S.vision || {entries:[], corrections:{}, feedback:[]}; S.vision.entries = [entry, ...(S.vision.entries||[])].slice(0,200); queuePush({vision:true}); }
 async function runInspoMatch(id){
   const x = (S.style.inspo||[]).find(y=>y.id===id); if(!x || !x.preview) return;
   try{
@@ -1326,7 +1358,11 @@ async function runInspoMatch(id){
   if(route().name==='style') render();
 }
 const simWord = s => s>=.92 ? 'Very close' : s>=.85 ? 'Close' : s>=.78 ? 'Similar' : 'Loosely similar';
-function matchRow(ms){ return `<span class="vm">${ms.map(m=>{ const p = piece(m.id); return p ? `<button type="button" class="vm-i" data-piece="${esc(p.id)}" aria-label="${esc(p.name)}, ${simWord(m.sim).toLowerCase()}"><span class="th">${art(p)}</span><small>${simWord(m.sim)}</small></button>` : ''; }).join('')}</span>`; }
+function matchRow(ms, ref, whole){
+  const taps = tapsFor(ref);
+  return `<span class="vm">${ms.map(m=>{ const p = piece(m.id); if(!p) return ''; const t = taps[p.id], reg = whole ? 'whole' : (REGION[p.cat]||'whole');
+    return `<span class="vm-w"><button type="button" class="vm-i" data-piece="${esc(p.id)}" aria-label="${esc(p.name)}, ${simWord(m.sim).toLowerCase()}"><span class="th">${art(p)}</span><small>${t===true?'Right':simWord(m.sim)}</small></button>${ref?`<span class="vm-fb"><button type="button" data-vfb="1" data-ref="${esc(ref)}" data-id="${esc(p.id)}" data-region="${reg}" aria-pressed="${t===true}" aria-label="Right match">&#10003;</button><button type="button" data-vfb="0" data-ref="${esc(ref)}" data-id="${esc(p.id)}" data-region="${reg}" aria-label="Wrong match">&#10005;</button></span>`:''}</span>`; }).join('')}</span>`;
+}
 
 /* ---------------- style: what Natalia likes ---------------- */
 const LOVE_WHY = [['colour','The colour'],['fit','The fit'],['fabric','The fabric'],['feel','How I feel in it'],['compliments','Compliments'],['easy','Easy to wear']];
@@ -1364,7 +1400,7 @@ function viewStyle(arg){
     if(!x.preview) return '';
     if(!x.matches) return `<button type="button" class="linkish" data-act="inspomatch" data-id="${esc(x.id)}">Find it in my closet</button>`;
     const wrong = wrongFor(x.id), best = ['top','outer','dress','bottom','shoes'].map(c=>((x.matches.byCat||{})[c]||[]).find(m=>!wrong.has(m.id))).filter(m=>m && m.sim>=.75).sort((a,b)=>b.sim-a.sim).slice(0,4);
-    return best.length ? `<span class="cap vm-cap">Closest in your closet</span>${matchRow(best)}` : `<span class="sub">Nothing in your closet is close.</span>`;
+    return best.length ? `<span class="cap vm-cap">Closest in your closet</span>${matchRow(best, x.id)}` : `<span class="sub">Nothing in your closet is close.</span>`;
   };
   const inspoCard = x => `<li><span class="in-ph">${x.preview?`<img src="${x.preview}" alt="">`:`<span class="in-link">Link</span>`}</span><span class="sub">${esc((x.tags||[]).map(k=>(INSPO_TAGS.find(y=>y[0]===k)||[])[1]).filter(Boolean).join(' · ') || 'Saved')}</span>${x.note?`<span class="note">${esc(x.note)}</span>`:''}${inspoMatches(x)}${x.url?`<a class="linkish" href="${esc(x.url)}" target="_blank" rel="noopener">Open link</a>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="inspo" data-id="${esc(x.id)}">Remove</button></li>`;
   return `${masthead()}
@@ -1377,10 +1413,11 @@ function viewStyle(arg){
     ${ins.length?`<ul class="inspo">${ins.map(inspoCard).join('')}</ul>`:''}
     <div class="acts"><a class="btn" href="#style/inspo">Add a picture</a></div></section>
   <section class="panel"><span class="cap">Do I already own this?</span><p class="caption pad">Before you buy, snap the piece. The app shows what in your closet looks most like it.</p>
-    ${S.ui.own ? `<div class="own pad"><img src="${S.ui.own.preview}" alt="The piece you checked">${S.ui.own.overall ? matchRow(S.ui.own.overall.slice(0,4)) : ''}</div>${S.ui.own.overall ? `<p class="caption pad">${S.ui.own.overall[0] && S.ui.own.overall[0].sim>=.9 ? `You own something very like this: the ${esc((piece(S.ui.own.overall[0].id)||{}).name||'').toLowerCase()}.` : S.ui.own.overall[0] && S.ui.own.overall[0].sim>=.84 ? 'You have something close. Worth a look before buying.' : 'Nothing very like it in your closet.'}</p>` : ''}` : ''}
+    ${S.ui.own ? (()=>{ const w = wrongFor(S.ui.own.ref), list = (S.ui.own.overall||[]).filter(m=>!w.has(m.id) && piece(m.id)).slice(0,4), top = list[0];
+      return `<div class="own pad"><img src="${S.ui.own.preview}" alt="The piece you checked">${S.ui.own.overall ? matchRow(list, S.ui.own.ref, true) : ''}</div>${S.ui.own.overall ? `<p class="caption pad">${top && top.sim>=.9 ? `You own something very like this: the ${esc(piece(top.id).name.toLowerCase())}.` : top && top.sim>=.84 ? 'You have something close. Worth a look before buying.' : 'Nothing very like it in your closet.'}</p>` : ''}`; })() : ''}
     ${V.busy?`<p class="caption pad busy">${esc(V.busy)}</p>`:''}
     <div class="acts"><label class="btn" for="ownphoto">Check a photo</label><input type="file" id="ownphoto" accept="image/*" class="sr"></div>
-    <p class="caption pad">Runs on your phone. The first time it downloads a vision model, about 90 MB, then looks at each of your pieces once.</p></section>
+    <p class="caption pad">Runs on your phone. The first time it downloads a vision model, about 90 MB, then looks at each of your pieces once. Tap &#10003; or &#10005; on a match and it learns from you.</p></section>
   <section class="panel"><span class="cap">What Claude has learned</span>
     ${rulesL.length?`<ul class="learned">${rulesL.map(r=>`<li>${esc(typeof r==='string'?r:r.text)}</li>`).join('')}</ul>`:`<p class="caption pad">Nothing yet. Once you've added a few loves, looks and pictures, ask Claude to read them. Your style rules will appear here and shape the daily looks.</p>`}</section>`;
 }
@@ -1517,6 +1554,28 @@ function ruleLine(r, id){
   if(r.kind==='pair'){ const other = piece(r.a===id ? r.b : r.a); return `Not paired with the ${other ? other.name.toLowerCase() : 'other piece'} after ${r.n} "Colours looked dead" reports.`; }
   return ruleText(r);
 }
+// The label details: what she sees on the label and how the piece sits on her. Saved straight to the closet.
+const SHAPE = {
+  fit:{l:'Fit on you', o:[['fitted','Fitted'],['regular','Regular'],['relaxed','Relaxed'],['oversized','Oversized']]},
+  length:{l:'Length'},
+  leg:{l:'Leg', o:[['wide','Wide'],['straight','Straight'],['slim','Slim'],['bootcut','Bootcut']]},
+  pattern:{l:'Pattern', o:[['none','Plain'],['small','Small print'],['medium','Medium'],['large','Large, bold']]},
+  styleTags:{l:'Feels like (up to two)', o:[['classic','Classic'],['casual','Casual'],['feminine','Feminine'],['creative','Creative'],['sporty','Sporty'],['sharp','Sharp']], multi:true}
+};
+const LEN_TOP = [['cropped','Cropped'],['waist','Waist'],['hip','Hip'],['long','Long']], LEN_DRESS = [['mini','Mini'],['knee','Knee'],['midi','Midi'],['maxi','Maxi']];
+const skirtish = p => p.cat==='dress' || /skirt|shorts/i.test(p.name);
+function shapeGroups(p){
+  const g = [];
+  if(['top','outer','dress','bottom'].includes(p.cat)) g.push('fit');
+  if(p.cat==='top' || p.cat==='outer' || skirtish(p)) g.push('length');
+  if(p.cat==='bottom' && !/skirt|shorts/i.test(p.name)) g.push('leg');
+  g.push('pattern','styleTags');
+  return g;
+}
+function shapeFields(p){
+  return shapeGroups(p).map(k=>{ const G = SHAPE[k], opts = k==='length' ? (skirtish(p) ? LEN_DRESS : LEN_TOP) : G.o, v = p[k];
+    return `<div class="field"><span class="cap">${G.l}${!p.shapeChecked && (G.multi ? (v||[]).length : v) ? ' <em class="guess">a guess</em>' : ''}</span></div><div class="segs wrap" role="group" aria-label="${G.l}">${opts.map(([val,lab])=>`<button type="button" class="label" data-shape="${k}" data-v="${val}" aria-pressed="${G.multi ? (v||[]).includes(val) : v===val}">${lab}</button>`).join('')}</div>`; }).join('');
+}
 function sheetPiece(id){
   const p = piece(id); if(!p) return;
   const s = stats()[id], f = fabricOf(p), rep = onRepeatSince(id), sx = statusOf(p);
@@ -1540,6 +1599,7 @@ function sheetPiece(id){
       ${learned}
       <div class="field"><label class="cap" for="pbrand">Brand</label><input id="pbrand" value="${esc(p.brand||'')}" placeholder="From the label"></div>
       <div class="field"><label class="cap" for="pcomp">Composition</label><input id="pcomp" value="${esc(p.composition||'')}" placeholder="80% wool, 20% cashmere"></div>
+      ${shapeFields(p)}
       <div class="toggles">
         <label class="toggle"><span>Office days</span><input type="checkbox" class="switch" data-occ-toggle="office" ${(p.occasions||[]).includes('office')?'checked':''}></label>
         <label class="toggle"><span>Customer days<small>Smart enough for an important meeting.</small></span><input type="checkbox" class="switch" data-occ-toggle="customer" ${(p.occasions||[]).includes('customer')?'checked':''}></label>
@@ -1726,7 +1786,12 @@ document.addEventListener('click', async e=>{
   const t = e.target.closest('button, a'); if(!t) return;
   if(t.dataset.close!==undefined){ closeSheet(); return; }
   if(t.dataset.repeat){ toggleRepeat(t.dataset.repeat); return; }
+  if(t.dataset.shape){ const k = t.dataset.shape, on = t.getAttribute('aria-pressed')!=='true', sib = [...document.querySelectorAll(`[data-shape="${k}"]`)];
+    if(SHAPE[k].multi){ if(on && sib.filter(b=>b.getAttribute('aria-pressed')==='true').length>=2){ toast('Two at most'); return; } t.setAttribute('aria-pressed', on); }
+    else { sib.forEach(b=>b.setAttribute('aria-pressed', 'false')); t.setAttribute('aria-pressed', on); }
+    return; }
   if(t.dataset.love){ toggleLove(t.dataset.love); return; }
+  if(t.dataset.vfb){ const ok = tapMatch(t.dataset.ref, t.dataset.id, t.dataset.vfb==='1', t.dataset.region); render(); toast(ok===true ? 'Right. It will find this one more easily.' : ok===false ? "Got it. It won't suggest that here, or for pictures like it." : 'Cleared'); return; }
   if(t.dataset.mode){ S.state.modes[t.dataset.date] = t.dataset.mode; delete S.state.swaps[t.dataset.date]; queuePush({state:true}); render(); toast(MODES[t.dataset.mode]); return; }
   if(t.dataset.rate!==undefined){ const y = t.dataset.rate==='1'; rateLook(t.dataset.date, y); render(); toast(y ? 'Noted. More like this.' : 'Noted. Less like this.'); return; }
   if(t.dataset.lovewhy){ const id = t.dataset.lovewhy, v = S.style.loves[id] || (S.style.loves[id] = {at:TODAY, why:[]}); const k = t.dataset.why; v.why = (v.why||[]).includes(k) ? v.why.filter(x=>x!==k) : [...(v.why||[]), k]; t.setAttribute('aria-pressed', v.why.includes(k)); queuePush({style:true}); render(); return; }
@@ -1792,6 +1857,9 @@ document.addEventListener('click', async e=>{
     const occs = [...document.querySelectorAll('[data-occ-toggle]')].filter(x=>x.checked).map(x=>x.dataset.occToggle);
     if(p.occasions && p.occasions.includes('off')) occs.push('off');
     const patch = {brand: $('#pbrand').value.trim(), composition: $('#pcomp').value.trim(), occasions: occs, statement: $('#pstmt').checked, dontWear: $('#paside').checked};
+    shapeGroups(p).forEach(k=>{ const on = [...document.querySelectorAll(`[data-shape="${k}"][aria-pressed="true"]`)].map(b=>b.dataset.v); patch[k] = SHAPE[k].multi ? on : (on[0]||null); });
+    const changed = shapeGroups(p).some(k=>JSON.stringify(patch[k]||null)!==JSON.stringify(p[k]||null)) || patch.brand!==(p.brand||'') || patch.composition!==(p.composition||'');
+    if(changed){ patch.shapeChecked = true; patch.labelAt = Date.now(); }
     Object.assign(p, patch); S.state.edits[p.id] = Object.assign({}, S.state.edits[p.id], patch);
     queuePush({closet:true}); closeSheet(); render(); toast('Saved');
   }
@@ -1878,8 +1946,8 @@ document.addEventListener('change', async e=>{
   if(el.id==='plove'){ toggleLove(el.dataset.id); return; }
   if(el.id==='ownphoto' && el.files[0]){
     const f = el.files[0], ph = await readPhoto(f); if(!ph){ toast("That photo couldn't be read."); return; }
-    S.ui.own = {preview: ph.preview}; render();
-    try{ const r = await matchPicture(f, null); S.ui.own.overall = r.overall; logVision({id:'v-'+Date.now().toString(36), at:Date.now(), kind:'own', overall:r.overall, byCat:r.byCat}); }
+    const vid = 'v-'+Date.now().toString(36); S.ui.own = {preview: ph.preview, ref: vid}; render();
+    try{ const r = await matchPicture(f, vid); S.ui.own.overall = r.overall; logVision({id:vid, at:Date.now(), kind:'own', overall:r.overall, byCat:r.byCat}); }
     catch(err){ V.busy = ''; toast(err.message || 'The vision model failed.'); }
     render(); return;
   }

@@ -396,9 +396,15 @@ h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
 .vm{display:flex;gap:10px;flex-wrap:wrap}
 .vm-i{background:none;border:0;padding:0;display:grid;gap:4px;justify-items:center;width:64px;cursor:pointer;color:var(--ink)}
 .vm-i .th{width:56px;height:56px;display:grid;place-items:center;background:var(--paper)}
-.vm-i .th svg,.vm-i .th img{max-width:100%;max-height:100%}
+.vm-i .th{overflow:hidden}
+.vm-i .th svg,.vm-i .th img{width:56px;height:56px;object-fit:contain}
 .vm-i small{font:500 8.5px/1.2 var(--jost);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);text-align:center}
 .vm-cap{display:block;padding:0;margin-top:2px}
+.vm-w{display:grid;gap:4px;justify-items:center}
+.vm-fb{display:flex;gap:4px}
+.vm-fb button{width:30px;height:30px;border:1px solid var(--rule);background:none;border-radius:50%;font:500 12px/1 var(--jost);color:var(--ink-2);cursor:pointer}
+.vm-fb button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.guess{font-style:normal;text-transform:none;letter-spacing:0;color:var(--ink-2);opacity:.8}
 .own{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px}
 .own img{width:72px;height:92px;object-fit:cover;display:block}
 .busy{color:var(--ink)}
