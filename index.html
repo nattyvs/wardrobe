@@ -328,6 +328,25 @@ p.pad{margin:0 0 12px}
 .finds button{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--rule-soft);padding:10px 0;font:400 16px/1.25 var(--didot)}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .field input[type=date]{-webkit-appearance:none;appearance:none;min-height:40px;font-family:var(--jost)}
+/* style: loves, looks, inspiration */
+.tile .love{position:absolute;top:0;left:0}
+h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
+.looks,.inspo,.learned{list-style:none;margin:0;padding:0 var(--gutter-r) 0 var(--gutter)}
+.looks li{display:grid;grid-template-columns:56px minmax(0,1fr);gap:4px 14px;padding:14px 0;border-bottom:1px solid var(--rule-soft);align-items:start}
+.looks .lk-ph img{width:56px;height:72px;object-fit:cover;display:block}
+.looks .lk-ph:empty{display:block;width:56px;height:72px;background:var(--paper)}
+.looks .lk-body{display:grid;gap:6px;min-width:0}
+.looks .sub,.inspo .sub{font:500 9.5px/1.4 var(--jost);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2)}
+.looks .note,.inspo .note{font-size:13px;line-height:1.4;color:var(--ink)}
+.looks .rm{grid-column:2;justify-self:start}
+.inspo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 14px;padding-bottom:6px}
+.inspo li{display:grid;gap:6px;align-content:start;min-width:0}
+.inspo .in-ph{display:block;background:var(--paper);aspect-ratio:4/5;overflow:hidden}
+.inspo .in-ph img{width:100%;height:100%;object-fit:cover;display:block}
+.inspo .in-link{display:grid;place-items:center;height:100%;font:400 18px/1 var(--didot);color:var(--ink-2)}
+.inspo .linkish{justify-self:start}
+.learned li{padding:10px 0;border-bottom:1px solid var(--rule-soft);font:400 17px/1.35 var(--didot)}
+.thumbs.chosen{height:52px;margin-top:6px}
 </style>
 </head>
 <body>
@@ -336,6 +355,7 @@ p.pad{margin:0 0 12px}
   <a href="#today" data-tab="today"><span class="label">Today</span></a>
   <a href="#week" data-tab="week"><span class="label">Week</span></a>
   <a href="#closet" data-tab="closet"><span class="label">Closet</span></a>
+  <a href="#style" data-tab="style"><span class="label">Style</span></a>
   <a href="#log" data-tab="log"><span class="label">Log</span></a>
 </div></nav>
 <div class="scrim" id="scrim"></div>

@@ -19,6 +19,7 @@ const S = {
   state: Object.assign({dayOcc:{}, swaps:{}, edits:{}, onRepeat:{}, ruleOff:{}}, cache.state || {}),
   trips: cache.trips || [],
   palette: cache.palette || null,
+  style: Object.assign({loves:{}, looks:[], inspo:[], rules:[]}, cache.style || {}),
   tripwx: LS.get('wd.tripwx', {}),
   weather: LS.get('wd.weather', null),
   sha: cache.sha || {},
@@ -26,7 +27,7 @@ const S = {
   photos: {},
   ui: {memo:{}, rules:null}
 };
-function persist(){ S.ui.memo = {}; S.ui.rules = null; LS.set('wd.cache', {closet:S.closet, log:S.log, plan:S.plan, state:S.state, trips:S.trips, palette:S.palette, sha:S.sha, synced:S.synced}); }
+function persist(){ S.ui.memo = {}; S.ui.rules = null; LS.set('wd.cache', {closet:S.closet, log:S.log, plan:S.plan, state:S.state, trips:S.trips, palette:S.palette, style:S.style, sha:S.sha, synced:S.synced}); }
 function saveSettings(){ LS.set('wd.settings', settings); }
 
 /* ---------------- dates ---------------- */
@@ -385,6 +386,7 @@ function buildOutfit(date, opts){
     if(slot==='shoes' && w && w.rainChance>=60 && /suede/i.test(p.composition||'')) s -= 3;
     if(R.avoid[p.id]) s -= 3.5;
     if(R.loved[p.id]) s += 0.8;
+    if(loved(p.id)) s += 0.6; // a piece she has said she loves
     s += faceBonus(p, slot);
     s += hash(date+p.id)*0.35;
     return s;
@@ -402,6 +404,7 @@ function buildOutfit(date, opts){
       if(patterned(p) && chosen.some(patterned)) s -= 2.5;
       chosen.forEach(c => { s -= proportionClash(c, p); });
       if(chosen.some(c=>pairAvoid(c.id, p.id))) s -= 50;
+      if(chosen.some(c=>pairLoved(c.id, p.id))) s += 1.2; // worn together in a look she loved
       return {p, s};
     }).sort((a,b)=>b.s-a.s);
     return list[0] ? list[0].p : null;
@@ -767,7 +770,7 @@ async function loadPhoto(path){
 loadPhoto.busy = {};
 async function pull(){
   if(!ghReady()) return;
-  const files = {closet:'data/closet.json', log:'data/wearlog.json', plan:'data/plan.json', state:'data/state.json', trips:'data/trips.json', palette:'data/palette.json'};
+  const files = {closet:'data/closet.json', log:'data/wearlog.json', plan:'data/plan.json', state:'data/state.json', trips:'data/trips.json', palette:'data/palette.json', style:'data/style.json'};
   const out = {};
   for(const [k,p] of Object.entries(files)){ const r = await ghGet(p); S.sha[p] = r.sha; out[k] = r.data; }
   if(out.closet && out.closet.pieces) S.closet = out.closet.pieces.map(p=>Object.assign({}, p, S.state.edits[p.id]||{}));
@@ -788,6 +791,14 @@ async function pull(){
     S.trips = Object.values(byId).filter(t=>!t.deleted);
   }
   if(out.palette && out.palette.best) S.palette = out.palette;
+  if(out.style){
+    // Loves: a local untap is kept as null so an old copy can't bring it back. Looks and pictures merge by id.
+    S.style.loves = Object.assign({}, out.style.loves||{}, S.style.loves);
+    const mergeById = (a, b) => { const m = {}; (a||[]).forEach(x=>m[x.id]=x); (b||[]).forEach(x=>{ if(!m[x.id] || (x.updated||0) > (m[x.id].updated||0)) m[x.id]=x; }); return Object.values(m).sort((x,y)=>(y.added||0)-(x.added||0)); };
+    S.style.looks = mergeById(out.style.looks, S.style.looks);
+    S.style.inspo = mergeById(out.style.inspo, S.style.inspo);
+    S.style.rules = out.style.rules || S.style.rules || [];
+  }
   S.synced = Date.now(); persist();
 }
 let pushTimer = null;
@@ -803,6 +814,7 @@ function queuePush(what){
       if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff}, 'Update day settings');
       if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
       if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
+      if(w.style){ const cur = await ghGet('data/style.json'); S.sha['data/style.json'] = cur.sha; if(cur.data && cur.data.rules) S.style.rules = cur.data.rules; await ghPut('data/style.json', S.style, 'Update style notes'); } // rules are Claude's, so keep whatever is on GitHub
       S.synced = Date.now(); persist();
     }catch(e){ toast(e.message || 'Saved here. Will sync later.'); }
   }, 900);
@@ -824,6 +836,7 @@ function render(opts){
   else if(r.name==='trip') { app.innerHTML = viewTrip(r.arg, r.sub); const t = tripById(r.arg); if(t && !isTripForm(r)) ensureTripWeather(t); }
   else if(r.name==='closet') app.innerHTML = viewCloset(r.arg||'all');
   else if(r.name==='log') app.innerHTML = viewLog(r.arg||TODAY);
+  else if(r.name==='style') app.innerHTML = viewStyle(r.arg);
   else app.innerHTML = viewDay(r.name==='day' && r.arg ? r.arg : TODAY, opts && opts.settle);
   document.title = 'Wardrobe';
 }
@@ -945,7 +958,7 @@ function viewCloset(filter){
   const item = p => { const s = st[p.id], rep = onRepeatSince(p.id), sx = statusOf(p);
     const fresh = hasHistory() && live(p) && sx==='available' && !rep && (!s.last || daysBetween(s.last, TODAY)>=60);
     const line = p.dontWear ? 'Set aside' : sx!=='available' ? STATUS[sx] : rep ? `On repeat since ${shortDate(rep)}` : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : sinceWords(null);
-    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span><span class="st${fresh?' fresh':''}">${esc(line)}</span></button>${repeatBtn(p.id)}</div>`; };
+    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span><span class="st${fresh?' fresh':''}">${esc(line)}</span></button>${loveBtn(p.id)}${repeatBtn(p.id)}</div>`; };
   let body = '';
   const list = all.filter(F[filter].f);
   if(filter==='doubles'){
@@ -1016,6 +1029,112 @@ function viewSettings(){
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savesettings">Save and sync</button><a class="btn ghost" href="#log">Back</a></div>
     <div class="field"><span class="hint">Last synced: ${esc(when)}. Forecast from Open-Meteo for ${esc(settings.city)}.</span></div>
   </div>`;
+}
+
+/* ---------------- style: what Natalia likes ---------------- */
+const LOVE_WHY = [['colour','The colour'],['fit','The fit'],['fabric','The fabric'],['feel','How I feel in it'],['compliments','Compliments'],['easy','Easy to wear']];
+const LOOK_TAGS = [['me','Felt like me'],['compliments','Got compliments'],['colours','The colours'],['proportions','The proportions'],['layers','The layering'],['comfort','Comfortable'],['sharp','Sharp for work']];
+const INSPO_TAGS = [['colours','Colours'],['proportions','Proportions'],['prints','Print mixing'],['layers','Layering'],['shoes','Shoes'],['accessories','Accessories'],['tailoring','Tailoring'],['mood','The mood']];
+const HEART = on => `<svg viewBox="0 0 20 20" width="18" height="18" fill="${on?'currentColor':'none'}" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><path d="M10 16.5s-6-3.7-6-8.2A3.3 3.3 0 0 1 10 6.6a3.3 3.3 0 0 1 6 1.7c0 4.5-6 8.2-6 8.2Z"/></svg>`;
+const loved = id => { const v = S.style.loves[id]; return v || null; };
+function loveBtn(id){
+  const on = !!loved(id);
+  return `<button type="button" class="rep love" data-love="${esc(id)}" aria-pressed="${on}" aria-label="${on?'One I love. Tap to clear.':'Mark as one I love'}">${HEART(on)}</button>`;
+}
+function liveLooks(){ return (S.style.looks||[]).filter(x=>!x.deleted); }
+function liveInspo(){ return (S.style.inspo||[]).filter(x=>!x.deleted); }
+// Pieces Natalia has worn together in a look she loved: the engine leans towards these pairings.
+function lovedPairs(){
+  if(S.ui.memo.pairs) return S.ui.memo.pairs;
+  const set = new Set();
+  liveLooks().forEach(l=>{ const ids = l.items||[]; ids.forEach(a=>ids.forEach(b=>{ if(a<b) set.add(a+'|'+b); })); });
+  return (S.ui.memo.pairs = set);
+}
+const pairLoved = (a,b) => lovedPairs().has(a<b ? a+'|'+b : b+'|'+a);
+function tagChips(list, chosen, attr){
+  return `<div class="segs wrap" role="group">${list.map(([k,l])=>`<button type="button" class="label" ${attr}="${k}" aria-pressed="${chosen.includes(k)}">${l}</button>`).join('')}</div>`;
+}
+function viewStyle(arg){
+  if(arg==='look') return viewLookForm();
+  if(arg==='inspo') return viewInspoForm();
+  const loves = closet().filter(p=>loved(p.id));
+  const looks = liveLooks(), ins = liveInspo(), rulesL = S.style.rules || [];
+  const whyLine = p => (loved(p.id).why||[]).map(k=>(LOVE_WHY.find(x=>x[0]===k)||[])[1]).filter(Boolean).join(' · ');
+  const loveGrid = loves.length ? `<div class="grid">${loves.map(p=>`<div class="tile"><button type="button" class="item" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name)}</span><span class="st">${esc(whyLine(p) || 'Loved')}</span></button>${loveBtn(p.id)}</div>`).join('')}</div>` : `<p class="empty">Nothing yet. Tap the heart on a piece in the Closet, or open it and say why you love it.</p>`;
+  const lookRow = l => { const ps = (l.items||[]).map(piece).filter(Boolean);
+    return `<li><span class="lk-ph">${l.preview?`<img src="${l.preview}" alt="">`:''}</span><span class="lk-body"><span class="thumbs">${ps.map(p=>`<span>${art(p)}</span>`).join('')}</span><span class="sub">${esc([OCC[l.occ]||'', ...(l.tags||[]).map(k=>(LOOK_TAGS.find(x=>x[0]===k)||[])[1])].filter(Boolean).join(' · '))}</span>${l.note?`<span class="note">${esc(l.note)}</span>`:''}</span><button type="button" class="linkish rm" data-act="rmstyle" data-kind="looks" data-id="${esc(l.id)}">Remove</button></li>`; };
+  const inspoCard = x => `<li><span class="in-ph">${x.preview?`<img src="${x.preview}" alt="">`:`<span class="in-link">Link</span>`}</span><span class="sub">${esc((x.tags||[]).map(k=>(INSPO_TAGS.find(y=>y[0]===k)||[])[1]).filter(Boolean).join(' · ') || 'Saved')}</span>${x.note?`<span class="note">${esc(x.note)}</span>`:''}${x.url?`<a class="linkish" href="${esc(x.url)}" target="_blank" rel="noopener">Open link</a>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="inspo" data-id="${esc(x.id)}">Remove</button></li>`;
+  return `${masthead()}
+  <header class="pagehead"><h1 class="page">Style</h1><p class="lede">Show the app what you love, so the looks start to sound like you. Claude reads everything here and writes your rules.</p></header>
+  <section class="group"><h2 class="sec">Pieces I love <span class="n">${loves.length}</span></h2>${loveGrid}</section>
+  <section class="panel"><span class="cap">Looks I loved</span><p class="caption pad">An outfit that worked. A photo helps, but the pieces are enough.</p>
+    ${looks.length?`<ul class="looks">${looks.map(lookRow).join('')}</ul>`:''}
+    <div class="acts"><a class="btn" href="#style/look">Add a look</a></div></section>
+  <section class="panel"><span class="cap">Inspiration</span><p class="caption pad">Screenshots and links from anywhere. Say what caught your eye.</p>
+    ${ins.length?`<ul class="inspo">${ins.map(inspoCard).join('')}</ul>`:''}
+    <div class="acts"><a class="btn" href="#style/inspo">Add a picture</a></div></section>
+  <section class="panel"><span class="cap">What Claude has learned</span>
+    ${rulesL.length?`<ul class="learned">${rulesL.map(r=>`<li>${esc(typeof r==='string'?r:r.text)}</li>`).join('')}</ul>`:`<p class="caption pad">Nothing yet. Once you've added a few loves, looks and pictures, ask Claude to read them. Your style rules will appear here and shape the daily looks.</p>`}</section>`;
+}
+function newLookDraft(){ return {items:[], tags:[], occ:'office', note:'', photo:null}; }
+function viewLookForm(){
+  const d = S.ui.look || (S.ui.look = newLookDraft());
+  const sel = new Set(d.items), cat = S.ui.lookCat || 'top';
+  const cats = [['outer','Outer'],['top','Tops'],['bottom','Bottoms'],['dress','Dresses'],['shoes','Shoes'],['accessory','Extras'],['bag','Bags']].filter(([c])=>closet().some(p=>p.cat===c));
+  const chosen = d.items.map(piece).filter(Boolean);
+  const list = closet().filter(p=>p.cat===cat);
+  return `${masthead()}
+  <header class="pagehead"><h1 class="page">A look I loved</h1><p class="lede">Tick what you wore. Then say what made it work.</p></header>
+  <div class="stack">
+    <div class="field"><span class="cap">The pieces <span class="n">${chosen.length}</span></span>${chosen.length?`<span class="thumbs chosen">${chosen.map(p=>`<span>${art(p)}</span>`).join('')}</span>`:'<span class="hint">Nothing ticked yet.</span>'}</div>
+  </div>
+  <div class="segs" role="tablist" aria-label="Pick from">${cats.map(([k,l])=>`<button type="button" class="label" data-lookcat="${k}" aria-pressed="${k===cat}">${l}</button>`).join('')}</div>
+  <ul class="picklist">${list.map(p=>`<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(p.colour||'')}</span></span><input type="checkbox" class="check" data-lookpick="${esc(p.id)}" ${sel.has(p.id)?'checked':''} aria-label="${esc(p.name)}"></label></li>`).join('')}</ul>
+  <div class="stack">
+    <div class="field"><span class="cap">Where to</span></div>
+    ${tagChips(Object.entries(OCC), [d.occ], 'data-lookocc')}
+    <div class="field"><span class="cap">What made it work</span></div>
+    ${tagChips(LOOK_TAGS, d.tags, 'data-looktag')}
+    <div class="field"><label class="cap" for="looknote">In your words</label><textarea id="looknote" rows="2" placeholder="Wine with camel. Wide trousers, fitted knit.">${esc(d.note)}</textarea></div>
+    <div class="field"><span class="cap">Photo</span><div class="photo-in">${d.photo?`<img src="${d.photo.preview}" alt="Look photo">`:''}<label class="linkish" for="lookphoto">${d.photo?'Replace photo':'Add a photo'}</label><input type="file" id="lookphoto" accept="image/*" class="sr"></div><span class="hint">Optional. A mirror selfie or any photo of you in it.</span></div>
+    <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savelook">Save the look</button><button type="button" class="btn ghost" data-act="cancelstyle">Cancel</button></div>
+  </div>`;
+}
+function newInspoDraft(){ return {tags:[], note:'', url:'', photo:null}; }
+function viewInspoForm(){
+  const d = S.ui.inspo || (S.ui.inspo = newInspoDraft());
+  return `${masthead()}
+  <header class="pagehead"><h1 class="page">Inspiration</h1><p class="lede">A screenshot, a saved post, a magazine page. Add the picture or the link, or both.</p></header>
+  <div class="stack">
+    <div class="field"><span class="cap">Picture</span><div class="photo-in">${d.photo?`<img src="${d.photo.preview}" alt="Inspiration">`:''}<label class="linkish" for="inspophoto">${d.photo?'Replace picture':'Add a picture'}</label><input type="file" id="inspophoto" accept="image/*" class="sr"></div></div>
+    <div class="field"><label class="cap" for="inspourl">Link</label><input id="inspourl" type="url" inputmode="url" value="${esc(d.url)}" placeholder="https://" autocomplete="off" spellcheck="false"></div>
+    <div class="field"><span class="cap">What caught your eye</span></div>
+    ${tagChips(INSPO_TAGS, d.tags, 'data-inspotag')}
+    <div class="field"><label class="cap" for="insponote">In your words</label><textarea id="insponote" rows="2" placeholder="The burgundy with tan. Loose trousers, small top.">${esc(d.note)}</textarea></div>
+    <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="saveinspo">Save</button><button type="button" class="btn ghost" data-act="cancelstyle">Cancel</button></div>
+  </div>`;
+}
+function sheetLove(id){
+  const p = piece(id); if(!p) return;
+  const v = loved(id) || {why:[]};
+  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Why you love it</span><button type="button" class="linkish" data-close>Done</button></div>
+    <h2 class="sec">${esc(p.name)}</h2>
+    <p class="caption pad" style="margin:8px 0 0">Pick any that apply. It stays loved either way.</p>
+    ${tagChips(LOVE_WHY, v.why||[], 'data-lovewhy="'+esc(id)+'" data-why')}`);
+}
+async function readPhoto(f){
+  const img = await createImageBitmap(f).catch(()=>null); if(!img) return null;
+  const k = Math.min(1, 1400/Math.max(img.width, img.height)), cv = document.createElement('canvas');
+  cv.width = Math.round(img.width*k); cv.height = Math.round(img.height*k); const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0,0,cv.width,cv.height); cx.drawImage(img,0,0,cv.width,cv.height);
+  const url = cv.toDataURL('image/jpeg', .82);
+  const small = document.createElement('canvas'); const k2 = 240/Math.max(cv.width,cv.height); small.width=Math.round(cv.width*k2); small.height=Math.round(cv.height*k2); small.getContext('2d').drawImage(cv,0,0,small.width,small.height);
+  return {b64:url.split(',')[1], preview: small.toDataURL('image/jpeg', .72)};
+}
+function toggleLove(id){
+  const on = !!loved(id);
+  S.style.loves[id] = on ? null : {at:TODAY, why:[]};
+  queuePush({style:true}); render();
+  if(!on){ sheetLove(id); toast('Loved. Say why, if you like.'); } else toast('No longer marked as loved');
 }
 
 /* ---------------- trips: screens ---------------- */
@@ -1105,6 +1224,7 @@ function sheetPiece(id){
       <div class="field"><span class="cap">Status</span></div>
       <div class="segs wrap" role="group" aria-label="Status">${Object.keys(STATUS).map(k=>`<button type="button" class="label" data-status="${k}" data-id="${esc(id)}" aria-pressed="${sx===k}">${STATUS_TAP[k]}</button>`).join('')}</div>
       <div class="toggles"><label class="toggle"><span>On repeat<small id="repnote">${rep?`Since ${esc(shortDate(rep))}. Fades after ${ON_REPEAT_DAYS} days.`:'Wearing this a lot lately. No need to log each day.'}</small></span><input type="checkbox" class="switch" id="prepeat" data-id="${esc(id)}" ${rep?'checked':''}></label></div>
+      <div class="toggles"><label class="toggle"><span>One I love<small>${loved(id)&&(loved(id).why||[]).length?esc(loved(id).why.map(k=>(LOVE_WHY.find(x=>x[0]===k)||[])[1]).join(' · ')):'Shown a little more often, and taught to the style rules.'}</small></span><input type="checkbox" class="switch" id="plove" data-id="${esc(id)}" ${loved(id)?'checked':''}></label></div>
       ${learned}
       <div class="field"><label class="cap" for="pbrand">Brand</label><input id="pbrand" value="${esc(p.brand||'')}" placeholder="From the label"></div>
       <div class="field"><label class="cap" for="pcomp">Composition</label><input id="pcomp" value="${esc(p.composition||'')}" placeholder="80% wool, 20% cashmere"></div>
@@ -1201,6 +1321,12 @@ document.addEventListener('click', async e=>{
   const t = e.target.closest('button, a'); if(!t) return;
   if(t.dataset.close!==undefined){ closeSheet(); return; }
   if(t.dataset.repeat){ toggleRepeat(t.dataset.repeat); return; }
+  if(t.dataset.love){ toggleLove(t.dataset.love); return; }
+  if(t.dataset.lovewhy){ const id = t.dataset.lovewhy, v = S.style.loves[id] || (S.style.loves[id] = {at:TODAY, why:[]}); const k = t.dataset.why; v.why = (v.why||[]).includes(k) ? v.why.filter(x=>x!==k) : [...(v.why||[]), k]; t.setAttribute('aria-pressed', v.why.includes(k)); queuePush({style:true}); render(); return; }
+  if(t.dataset.lookcat){ S.ui.lookCat = t.dataset.lookcat; render(); return; }
+  if(t.dataset.lookocc){ S.ui.look.occ = t.dataset.lookocc; render(); return; }
+  if(t.dataset.looktag){ const d = S.ui.look, k = t.dataset.looktag; d.tags = d.tags.includes(k) ? d.tags.filter(x=>x!==k) : [...d.tags, k]; t.setAttribute('aria-pressed', d.tags.includes(k)); return; }
+  if(t.dataset.inspotag){ const d = S.ui.inspo, k = t.dataset.inspotag; d.tags = d.tags.includes(k) ? d.tags.filter(x=>x!==k) : [...d.tags, k]; t.setAttribute('aria-pressed', d.tags.includes(k)); return; }
   if(t.dataset.status){ setStatus(t.dataset.id, t.dataset.status); return; }
   if(t.dataset.react!==undefined){ sheetReact(t.dataset.date, t.dataset.react || null); return; }
   if(t.dataset.piece){ sheetPiece(t.dataset.piece); return; }
@@ -1239,6 +1365,27 @@ document.addEventListener('click', async e=>{
     const patch = {brand: $('#pbrand').value.trim(), composition: $('#pcomp').value.trim(), occasions: occs, statement: $('#pstmt').checked, dontWear: $('#paside').checked};
     Object.assign(p, patch); S.state.edits[p.id] = Object.assign({}, S.state.edits[p.id], patch);
     queuePush({closet:true}); closeSheet(); render(); toast('Saved');
+  }
+  else if(act==='savelook'){
+    const d = S.ui.look; if(!d || !d.items.length){ toast('Tick at least one piece'); return; }
+    const id = 'look-'+Date.now().toString(36), x = {id, added:Date.now(), updated:Date.now(), date:TODAY, items:d.items, tags:d.tags, occ:d.occ, note:d.note.trim()};
+    if(d.photo){ x.preview = d.photo.preview; if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, d.photo.b64, 'A look I loved'); x.photo = path; }catch(err){ toast(err.message); } } }
+    S.style.looks = [x, ...(S.style.looks||[])]; S.ui.look = null; S.ui.lookCat = null;
+    queuePush({style:true}); location.hash = '#style'; toast('Look saved');
+  }
+  else if(act==='saveinspo'){
+    const d = S.ui.inspo; if(!d || (!d.photo && !d.url.trim())){ toast('Add a picture or a link'); return; }
+    const id = 'inspo-'+Date.now().toString(36), x = {id, added:Date.now(), updated:Date.now(), url:d.url.trim(), tags:d.tags, note:d.note.trim()};
+    if(d.photo){ x.preview = d.photo.preview; if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, d.photo.b64, 'Inspiration'); x.photo = path; }catch(err){ toast(err.message); } } }
+    S.style.inspo = [x, ...(S.style.inspo||[])]; S.ui.inspo = null;
+    queuePush({style:true}); location.hash = '#style'; toast('Saved');
+  }
+  else if(act==='cancelstyle'){ S.ui.look = null; S.ui.inspo = null; S.ui.lookCat = null; location.hash = '#style'; }
+  else if(act==='rmstyle'){
+    const key = t.dataset.kind+'/'+t.dataset.id;
+    if(S.ui.confirmRm!==key){ S.ui.confirmRm = key; t.textContent = 'Tap again to remove'; return; }
+    const x = (S.style[t.dataset.kind]||[]).find(y=>y.id===t.dataset.id); if(x){ x.deleted = true; x.updated = Date.now(); }
+    S.ui.confirmRm = null; queuePush({style:true}); render(); toast('Removed');
   }
   else if(act==='laundry'){
     const ws = closet().filter(p=>statusOf(p)==='wash');
@@ -1283,6 +1430,10 @@ document.addEventListener('click', async e=>{
   }
 });
 document.addEventListener('input', e=>{
+  const sx = e.target;
+  if(sx.id==='looknote' && S.ui.look) S.ui.look.note = sx.value;
+  if(sx.id==='insponote' && S.ui.inspo) S.ui.inspo.note = sx.value;
+  if(sx.id==='inspourl' && S.ui.inspo) S.ui.inspo.url = sx.value;
   const el = e.target, d = S.ui.draft; if(!d || !el.dataset.draft) return;
   if(el.dataset.draft==='name') d.name = el.value;
   else { const s = d.stops[+el.dataset.i]; if(!s) return; s[el.dataset.draft] = el.value; if(el.dataset.draft==='place'){ s.lat = null; s.lon = null; s.results = null; } }
@@ -1290,6 +1441,12 @@ document.addEventListener('input', e=>{
 document.addEventListener('change', async e=>{
   const el = e.target;
   if(el.dataset.pack){ togglePack(el.dataset.trip, el.dataset.pack, el.checked); return; }
+  if(el.dataset.lookpick && S.ui.look){ const d = S.ui.look, id = el.dataset.lookpick; d.items = el.checked ? [...new Set([...d.items, id])] : d.items.filter(x=>x!==id); render(); return; }
+  if(el.id==='plove'){ toggleLove(el.dataset.id); return; }
+  if((el.id==='lookphoto' || el.id==='inspophoto') && el.files[0]){
+    const ph = await readPhoto(el.files[0]); if(!ph){ toast("That photo couldn't be read."); return; }
+    (el.id==='lookphoto' ? S.ui.look : S.ui.inspo).photo = ph; render(); toast('Photo added'); return;
+  }
   if(el.dataset.rtag){ toggleReaction(el.dataset.date, el.dataset.item || null, el.dataset.rtag, el.checked); return; }
   if(el.dataset.tact && S.ui.draft){ const a = S.ui.draft.activities, k = el.dataset.tact; S.ui.draft.activities = el.checked ? [...new Set([...a, k])] : a.filter(x=>x!==k); return; }
   if(el.id==='tcarry' && S.ui.draft){ S.ui.draft.carryOn = el.checked; return; }
