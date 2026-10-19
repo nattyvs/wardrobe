@@ -117,7 +117,7 @@ function tripName(t){ return t.name || (t.stops&&t.stops[0]&&t.stops[0].place ? 
 function tripDates(t){ const sp = tripSpan(t); return sp ? (sp.from===sp.to ? nice(sp.from) : `${nice(sp.from)} to ${nice(sp.to)}`) : 'No dates yet'; }
 
 /* ---------------- occasions ---------------- */
-const OCC = {office:'Office day', customer:'Customer day', home:'Home day', off:'Day off'};
+const OCC = {office:'Office day', customer:'Customer day', off:'Day off'};
 function occasionFor(date){
   const o = S.state.dayOcc[date];
   if(o && o.occ) return o;
@@ -127,8 +127,8 @@ function occasionFor(date){
   if(trip) return {occ: (trip.activities||[]).includes('work') && dow>0 && dow<6 ? 'office' : 'off', note:''};
   const pd = S.plan && S.plan.days && S.plan.days.find(d=>d.date===date);
   if(pd && pd.occasion) return {occ:pd.occasion, note:pd.occasionNote||''};
-  // Weekdays are home days until she marks the two or so she goes in (Week > In the office).
-  return {occ: (dow===0||dow===6) ? 'off' : 'home', note:''};
+  // Every day is a day off until she marks it as an office day (Week > Office days).
+  return {occ:'off', note:''};
 }
 
 /* ---------------- weather ---------------- */
@@ -360,16 +360,16 @@ function hueClose(a, b){
 function buildOne(date, opts){
   opts = opts || {};
   const scope = opts.scope !== undefined ? opts.scope : tripScope(date);
-  const o = occasionFor(date).occ, w = wx(date), t = w ? w.feel : 12, need = band(t);
+  const o = opts.occ || occasionFor(date).occ, w = wx(date), t = w ? w.feel : 12, need = band(t);
   const st = stats(date), R = rules();
-  const pool = closet().filter(p=>!(opts.exclude && opts.exclude.has(p.id)) && usable(p, !!scope) && (scope ? scope.has(p.id) : (!p.occasions || !p.occasions.length || p.occasions.includes(o) || (o==='home' && (p.occasions.includes('off') || p.occasions.includes('office'))))));
+  const pool = closet().filter(p=>!(opts.exclude && opts.exclude.has(p.id)) && usable(p, !!scope) && (scope ? scope.has(p.id) : (!p.occasions || !p.occasions.length || p.occasions.includes(o))));
   const recentDays = id => {
     if(onRepeatSince(id, date)) return 2; // on repeat counts as worn in the last few days
     let l = st[id] && st[id].last; const pl = opts.planned && opts.planned[id];
     if(pl && (!l || pl > l)) l = pl;
     return l ? daysBetween(l, date) : 999;
   };
-  const formal = o==='customer' ? 2.5 : o==='office' ? 1.6 : o==='home' ? 1.2 : 1;
+  const formal = o==='customer' ? 2.5 : o==='office' ? 1.6 : 1;
   const target = targetWarmth(need);
   function score(p, slot){
     let s = 0;
@@ -560,7 +560,7 @@ function buildOutfit(date, opts){
   if(mode==='rediscover'){
     // Start from what's been out least (or, before there's history, what isn't loved or on repeat) and only keep it if the look holds up.
     const st = stats(date);
-    const pool = closet().filter(p=>usable(p, !!opts.scope) && ['top','dress','bottom','outer','shoes','accessory'].includes(slotOf(p)) && (!opts.scope || opts.scope.has(p.id)) && (!p.occasions || !p.occasions.length || p.occasions.includes(occasionFor(date).occ) || (occasionFor(date).occ==='home' && (p.occasions.includes('off') || p.occasions.includes('office')))));
+    const pool = closet().filter(p=>usable(p, !!opts.scope) && ['top','dress','bottom','outer','shoes','accessory'].includes(slotOf(p)) && (!opts.scope || opts.scope.has(p.id)) && (!p.occasions || !p.occasions.length || p.occasions.includes(opts.occ || occasionFor(date).occ)));
     const restScore = p => { const l = st[p.id] && st[p.id].last; return (l ? Math.min(daysBetween(l,date),180) : 365) - (loved(p.id)?60:0) - (onRepeatSince(p.id,date)?300:0) + hash(date+p.id)*20; };
     const heroes = pool.sort((a,b)=>restScore(b)-restScore(a)).slice(0,6);
     const hc = [];
@@ -770,7 +770,7 @@ function packTrip(t){
   const needOf = c => c.t!=null ? band(c.t) : 3; // days without weather are planned as mild; the screen says so
   const R = rules(), st = stats();
   const pool = closet().filter(p=>usable(p, true));
-  const FORMAL = {customer:2.5, office:1.6, home:1.2, off:1};
+  const FORMAL = {customer:2.5, office:1.6, off:1};
   const days = ctx.map(c=>({c, need:needOf(c), formal:FORMAL[c.occ]}));
   if(acts.has('evenings')){ for(let i=0;i<Math.max(1,Math.round(D/3));i++){ const c = ctx[Math.min(D-1, i*3+2)]; days.push({c, need:needOf(c), formal:2.4}); } }
   const ago = p => { const l = st[p.id] && st[p.id].last; return l ? daysBetween(l, TODAY) : 999; };
@@ -1045,7 +1045,7 @@ function viewDay(date, settle){
     if(p.swatch && !S.photos[p.swatch] && ghReady()) loadPhoto(p.swatch);
     cf.push(`<li><i style="${sw}" role="img" aria-label="${esc((p.colour||'')+' '+f.name)}"></i><span><span class="t">${esc(p.colour||'')}${f.name?` · ${esc(f.name)}`:''}</span><span class="s">${esc(f.note)}</span></span></li>`); });
   const strip = weekOf(date).map(d=>{ const ww = wx(d), oc = occasionFor(d).occ; return `<a href="#day/${d}" class="${d===date?'on':''}" aria-label="${dayName(d)} ${nice(d)}"><span class="label">${dayShort(d)}</span><b>${ww?ww.feel+'°':'·'}</b><i class="${oc==='customer'?'':'no'}"></i></a>`; }).join('');
-  const tagCls = occ.occ==='customer' ? 'customer' : (occ.occ==='off' || occ.occ==='home') ? 'off' : '';
+  const tagCls = occ.occ==='customer' ? 'customer' : occ.occ==='off' ? 'off' : '';
   const actions = isToday
     ? (worn ? `<button type="button" class="btn" disabled>Worn today</button><a class="btn ghost" href="#log">Edit the log</a>` : `<button type="button" class="btn" data-act="wear" data-date="${date}">Wear this</button><button type="button" class="btn ghost" data-act="swap" data-date="${date}">Swap a piece</button>`)
     : `<button type="button" class="btn ghost" data-act="swap" data-date="${date}">Swap a piece</button>${date<TODAY?`<a class="btn ghost" href="#log/${date}">Log this day</a>`:''}`;
@@ -1081,7 +1081,7 @@ function dayRowHTML(d, place){
   const o = outfitFor(d), w = wx(d), oc = occasionFor(d);
   const thumbs = o.list.map(({p})=>`<span>${art(p)}</span>`).join('');
   const names = o.list.map(({p})=>p.name).join(', ');
-  return `<li class="${d===TODAY?'today':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':(oc.occ==='off'||oc.occ==='home')?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${o.list.length?`<div class="rowact"><button type="button" class="linkish" data-act="tryon" data-date="${d}">Try on in ChatGPT</button></div>`:''}</li>`;
+  return `<li class="${d===TODAY?'today':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':oc.occ==='off'?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${o.list.length?`<div class="rowact"><button type="button" class="linkish" data-act="tryon" data-date="${d}">Try on in ChatGPT</button></div>`:''}</li>`;
 }
 function tripStripHTML(){
   const t = upcomingTrips()[0]; if(!t) return '';
@@ -1089,9 +1089,35 @@ function tripStripHTML(){
   const line = n ? `${n} pieces packed` : 'Nothing packed yet';
   return `<a class="tripstrip" href="#trip/${esc(t.id)}"><span class="label">${tripSpan(t).from<=TODAY?'On a trip':'Coming up'}</span><span class="t">${esc(tripName(t))}</span><span class="s">${esc(tripDates(t))} · ${line}</span>${g?`<span class="g">${g} thing${g>1?'s':''} to fix before you go</span>`:''}</a>`;
 }
+const OFFICE_PER_WEEK = 2;
+const isInOffice = d => { const k = occasionFor(d).occ; return k==='office' || k==='customer'; };
+// Until the office days are picked, each week still carries two office looks to keep in mind. They are built for the
+// weather of the days still open, with the pieces already used that week set aside, and they are only a suggestion.
+function weekInspo(startDay){
+  const key = 'inspo|'+startDay; if(S.ui.memo[key]) return S.ui.memo[key];
+  const days = weekOf(startDay).slice(0,5);
+  const need = Math.max(0, OFFICE_PER_WEEK - days.filter(isInOffice).length);
+  const open = days.filter(d=>d>=TODAY && !isInOffice(d) && !activeTrip(d));
+  const out = []; S.ui.memo[key] = out;
+  if(!need || !open.length) return out;
+  const planned = {}; weekOf(startDay).forEach(d=>{ outfitFor(d).list.forEach(({p})=>planned[p.id] = d); });
+  const k = Math.min(need, open.length);
+  for(let i=0; i<k; i++){
+    const d = open[Math.min(open.length-1, Math.floor((i+.5)*open.length/k))];
+    const res = applySwaps(buildOutfit(d, {occ:'office', planned, scope:null}), '(inspiration)'); // no swaps apply, it only builds the list
+    if(!res.list.length) continue;
+    res.list.forEach(({p})=>planned[p.id] = d);
+    out.push(Object.assign({}, res, {forDay:d}));
+  }
+  return out;
+}
+function inspoRowsHTML(startDay){
+  return weekInspo(startDay).map((o,i)=>{ const w = wx(o.forDay);
+    return `<li class="olook"><span class="dn">${pad(i+1)}</span><span class="meta"><span class="top"><span class="tag">Office look</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${o.list.map(({p})=>`<span>${art(p)}</span>`).join('')}</span><span class="names">${esc(o.list.map(({p})=>p.name).join(', '))}. Made for ${esc(dayName(o.forDay))}'s weather. Tap a day above to put it on a day.</span></span><div class="rowact"><button type="button" class="linkish" data-act="tryon" data-inspo="${esc(startDay)}|${i}">Try on in ChatGPT</button></div></li>`; }).join('');
+}
 function officePicker(startDay, title){
   const days = weekOf(startDay).slice(0,5);
-  const isIn = d => { const k = occasionFor(d).occ; return k==='office' || k==='customer'; };
+  const isIn = isInOffice;
   const n = days.filter(isIn).length;
   return `<section class="office"><div class="officehead"><span class="cap">${esc(title)}</span><span class="caption">${n ? `${n} day${n>1?'s':''} in` : 'None picked'}</span></div>
     <div class="segs" role="group" aria-label="${esc(title)}">${days.map(d=>`<button type="button" class="label" data-office="${d}" aria-pressed="${isIn(d)}" aria-label="${dayName(d)} ${nice(d)}">${dayShort(d)} ${parse(d).getDate()}</button>`).join('')}</div></section>`;
@@ -1103,9 +1129,10 @@ function viewWeek(){
   return `${masthead()}
   <header class="pagehead"><h1 class="page">This week</h1><p class="cap">Week ${isoWeek(TODAY)} · ${esc(nice(days[0]))} to ${esc(nice(days[6]))}</p></header>
   ${tripStripHTML()}
-  <div class="officepick">${officePicker(TODAY, 'Office days this week')}${officePicker(addDays(monday(TODAY),7), 'Office days next week')}<p class="caption pad" style="margin:4px 0 0">Tap the days you go in. Other weekdays are dressed as home days. Tap a day's label on its page for a customer day or a day off.</p></div>
+  <div class="officepick">${officePicker(TODAY, 'Office days this week')}${officePicker(addDays(monday(TODAY),7), 'Office days next week')}<p class="caption pad" style="margin:4px 0 0">Every day starts as a day off. Tap the days you go in, and add an extra one any week by tapping it. Until you do, the week carries ${OFFICE_PER_WEEK} office looks to keep in mind. Tap a day's label on its page for a customer day.</p></div>
   ${note?`<div class="plan-note"><span class="label">From Claude</span>${esc(note)}</div>`:''}
   <hr class="rule">
+  ${inspoRowsHTML(TODAY) ? `<section class="officelooks"><span class="cap pad" style="display:block">Office looks to keep in mind</span><ul class="days">${inspoRowsHTML(TODAY)}</ul></section>` : ''}
   <ul class="days">${rows}</ul>
   <div class="acts"><a class="btn ghost" href="#trips">${upcomingTrips().length?'Trips':'Plan a trip'}</a></div>`;
 }
@@ -1495,10 +1522,10 @@ function tryImageBlock(t){
     <div class="acts">${canShare?`<button type="button" class="btn" data-act="tryshare">Share image</button>`:''}<button type="button" class="btn${canShare?' ghost':''}" data-act="tryimgcopy">Copy image</button><a class="btn ghost" href="${t.url}" download="${esc(t.name)}">Save image</a></div>
     <p class="caption pad" style="margin:12px 0 0">On an iPhone you can also press and hold the picture and choose Copy or Add to Photos.</p>`;
 }
-async function sheetTryOn(date){
-  const o = outfitFor(date); if(!o.list.length){ toast('Nothing to try on yet'); return; }
+async function sheetTryOn(date, given){
+  const o = given || outfitFor(date); if(!o.list.length){ toast('Nothing to try on yet'); return; }
   if(S.ui.try && S.ui.try.url) URL.revokeObjectURL(S.ui.try.url);
-  const token = Date.now(), name = `wardrobe-look-${date}.jpg`;
+  const token = Date.now(), name = `wardrobe-look-${String(date).replace(/[^0-9a-z-]/gi,'-')}.jpg`;
   S.ui.try = {date, token, name, prompt: tryPrompt(o)};
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Try it on in ChatGPT</span><button type="button" class="linkish" data-close>Done</button></div>
     <ol class="try-steps"><li>Save or copy the image of the outfit.</li><li>Copy the prompt.</li><li>In ChatGPT, attach a full-length photo of you and the image, then paste the prompt.</li></ol>
@@ -1588,7 +1615,7 @@ document.addEventListener('click', async e=>{
   if(t.dataset.inspotag){ const d = S.ui.inspo, k = t.dataset.inspotag; d.tags = d.tags.includes(k) ? d.tags.filter(x=>x!==k) : [...d.tags, k]; t.setAttribute('aria-pressed', d.tags.includes(k)); return; }
   if(t.dataset.office){
     const d = t.dataset.office, k = occasionFor(d).occ, inOffice = k==='office' || k==='customer';
-    S.state.dayOcc[d] = {occ: inOffice ? 'home' : 'office', note:''};
+    S.state.dayOcc[d] = {occ: inOffice ? 'off' : 'office', note:''};
     queuePush({state:true}); render(); return;
   }
   if(t.dataset.status){ setStatus(t.dataset.id, t.dataset.status); return; }
@@ -1603,7 +1630,10 @@ document.addEventListener('click', async e=>{
     queuePush({state:true}); closeSheet(); render(); toast('Swapped'); return;
   }
   const act = t.dataset.act; if(!act) return;
-  if(act==='tryon'){ sheetTryOn(t.dataset.date); return; }
+  if(act==='tryon'){
+    if(t.dataset.inspo){ const [wk,i] = t.dataset.inspo.split('|'), o = weekInspo(wk)[+i]; if(o) sheetTryOn(`office-look-${+i+1}`, o); return; }
+    sheetTryOn(t.dataset.date); return;
+  }
   if(act==='trycopy'){ const ta = $('#tryprompt'); toast(await copyText(ta ? ta.value : (S.ui.try||{}).prompt || '') ? 'Prompt copied' : 'Press and hold the text to copy it'); return; }
   if(act==='tryimgcopy'){
     const tr = S.ui.try; if(!tr || !tr.cv) return;
@@ -1618,7 +1648,7 @@ document.addEventListener('click', async e=>{
   }
   if(act==='city'){ settings.city = settings.city==='London' ? 'Paris' : 'London'; saveSettings(); await loadWeather(true); render(); toast(`Forecast for ${settings.city}`); }
   else if(act==='occ'){
-    const d = t.dataset.date, cur = occasionFor(d).occ, nx = {office:'customer', customer:'home', home:'off', off:'office'}[cur];
+    const d = t.dataset.date, cur = occasionFor(d).occ, nx = {office:'customer', customer:'off', off:'office'}[cur];
     S.state.dayOcc[d] = {occ:nx, note: nx==='customer' ? (occasionFor(d).note||'') : ''};
     queuePush({state:true}); render(); toast(OCC[nx]);
   }

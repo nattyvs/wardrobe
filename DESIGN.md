@@ -258,7 +258,7 @@ A one-sentence stone caption under the Look, no rule or fill, shown only when a 
 A sheet, opened from "Try it on in ChatGPT" under The look on Today and under each day on Week. It holds three numbered steps, a flat-lay image of the day's pieces (built on the phone, pieces laid apart on a paper-toned ground, no labels), Copy / Save / Share buttons, and the prompt in an editable box with Copy prompt and Open ChatGPT. Nothing is sent from the app. Her own photo is never stored here.
 
 ### Office Days Picker
-Top of Week: five day chips (Mon to Fri) for this week and next, filled ink when she is in the office. Unpicked weekdays are Home days. The Day tag on a day's page still cycles Office, Customer, Home, Day off.
+Top of Week: five day chips (Mon to Fri) for this week and next, filled ink when she is in the office. Every day starts as a day off. Until two office days are picked, the week shows the remaining office looks (numbered 01, 02) under "Office looks to keep in mind", built for the weather of the days still open. Picking a day, including a third one, puts a real office look on it. The tag on a day's page cycles Office, Customer, Day off.
 
 ### Sheet
 Bottom sheet on sand with the piece image on white, charcoal top rule, sticky bar with a section cap title and a text "Close", sliding up over a scrim with the house ease.
