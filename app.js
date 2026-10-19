@@ -296,7 +296,7 @@ const isDark = p => /^(black|navy)$/i.test(p.colour||'');
 function faceBonus(p, slot){
   if(!S.palette) return 0;
   if(!(slot==='top' || slot==='dress' || (slot==='accessory' && p.shape==='scarf'))) return 0;
-  const c = faceClass(p); return c==='best' ? 1.2 : c==='cool' ? -1.2 : 0;
+  const c = faceClass(p); return c==='best' ? 0.5 : c==='cool' ? -0.5 : 0; // a light nudge, not a rule
 }
 const isWarmAccent = x => !!x && (x.shape==='belt' ? /gold/i.test(x.name||'') : faceClass(x)==='best');
 function faceNote(o){
@@ -304,10 +304,11 @@ function faceNote(o){
   const face = o.slots.top || o.slots.dress; if(!face) return '';
   const cls = faceClass(face);
   if(cls!=='cool' && !isDark(face)) return '';
+  if(!([o.slots.accessory, o.slots.belt].some(isWarmAccent))) return '';
   const warm = [o.slots.accessory, o.slots.belt].filter(isWarmAccent)[0];
   const lead = `${cap1((face.colour||'').toLowerCase())} at the face`;
   if(warm) return `${lead}: the ${warm.shape==='belt' ? 'gold-buckle belt' : warm.name.toLowerCase()} warms it.`;
-  return cls==='cool' ? `${lead}. Nothing warm in the look to balance it.` : '';
+  return '';
 }
 
 /* ---------------- belts, scarves and bags ---------------- */
@@ -402,12 +403,6 @@ function buildOutfit(date, opts){
   if(loops && !slots.belt){ const b = beltFrom(by('belt'), beltWant(slots.bottom, need)); if(b){ slots.belt = b; chosen.push(b); } }
   const longScarf = p => p.shape==='scarf' && !/headband/i.test(p.name||'');
   if(slots.bottom && !loops && !slots.accessory && need>=2){ const x = pick('accessory','accessory',chosen,longScarf); if(x){ slots.accessory = x; chosen.push(x); } }
-  // Black or navy at the face: bring in something warm, unless it is too hot for a scarf.
-  const face = slots.top || slots.dress;
-  if(S.palette && face && isDark(face) && !isWarmAccent(slots.accessory) && !isWarmAccent(slots.belt) && need>=2){
-    const x = pick('accessory','accessory',chosen,p=>longScarf(p) && faceClass(p)==='best');
-    if(x){ slots.accessory = x; chosen.push(x); }
-  }
   // Bags: day-off looks by default, office days if the setting is on, and always in a suitcase.
   if(!slots.bag && (o==='off' || settings.bagsOffice || scope)){ const x = pick('bag','bag',chosen); if(x){ slots.bag = x; chosen.push(x); } }
   return {slots, hero, temp:t, need, occ:o, scope:!!scope};

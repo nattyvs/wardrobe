@@ -249,7 +249,7 @@ In the piece sheet, availability is a row of tracked Jost labels inside a charco
 After a day is logged, reactions are a wrapping row of square toggles in tracked Jost, charcoal when pressed. A learned rule sits on the piece sheet as a sentence on a stone-ruled row with a text "Undo" action. Sand is not used.
 
 ### Face Note
-A one-sentence stone caption under the Look, no rule or fill, used when a cool tone sits at the face and the look carries a warm accent. It states what was added and does not hide the piece.
+A one-sentence stone caption under the Look, no rule or fill, shown only when a dark or cool piece sits at the face and the look already carries a warm accent. It never asks for one.
 
 ### Sheet
 Bottom sheet on sand with the piece image on white, charcoal top rule, sticky bar with a section cap title and a text "Close", sliding up over a scrim with the house ease.

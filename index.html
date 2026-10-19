@@ -182,8 +182,8 @@ button.tag{cursor:pointer}
 .filters .n{font-family:var(--didot);letter-spacing:0;margin-left:4px;font-size:12px}
 .group{padding:0 var(--gutter-r) 0 var(--gutter)}
 .group h2{padding:22px 0 10px;border-bottom:1px solid var(--rule)}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px 14px;padding-top:14px}
-.item{background:none;border:0;padding:0;text-align:left;display:grid;gap:6px;align-content:start;min-width:0}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 14px;padding-top:14px}
+.item{background:none;border:0;padding:0;text-align:left;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;align-content:start;min-width:0}
 .item .img{aspect-ratio:4/5;display:grid;place-items:end center;padding:8% 10% 4%;border-bottom:1px solid var(--rule-soft)}
 .item .img svg,.item .img img{max-height:100%;max-width:100%;width:auto;height:auto}
 .item .img img{object-fit:contain;height:100%}
