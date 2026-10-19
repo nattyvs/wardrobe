@@ -16,7 +16,7 @@ const S = {
   closet: cache.closet || null,
   log: cache.log || null,
   plan: cache.plan || null,
-  state: Object.assign({dayOcc:{}, swaps:{}, edits:{}, onRepeat:{}, ruleOff:{}, modes:{}}, cache.state || {}),
+  state: Object.assign({dayOcc:{}, swaps:{}, edits:{}, onRepeat:{}, ruleOff:{}, modes:{}, dormant:{}, wearSoon:{}, since:null}, cache.state || {}),
   trips: cache.trips || [],
   palette: cache.palette || null,
   style: Object.assign({loves:{}, looks:[], inspo:[], rules:[]}, cache.style || {}),
@@ -403,6 +403,7 @@ function buildOne(date, opts){
     if(slot==='shoes' && w && w.rainChance>=60 && /suede/i.test(p.composition||'')) s -= 3;
     if(R.avoid[p.id]) s -= 3.5;
     if(R.loved[p.id]) s += 0.8;
+    if(soonOn(p.id, date)) s += 3.5; // she asked to wear it this week
     if(loved(p.id)) s += 0.6; // a piece she has said she loves
     s += faceBonus(p, slot);
     s += hash(date+p.id+(opts.seed||''))*(opts.seed ? 1.6 : 0.35);
@@ -1007,6 +1008,7 @@ async function pull(){
     S.state.dayOcc = Object.assign({}, out.state.dayOcc||{}, S.state.dayOcc); S.state.swaps = Object.assign({}, out.state.swaps||{}, S.state.swaps);
     // A tap that was undone is kept as null, so an old copy on GitHub can't bring it back.
     S.state.onRepeat = Object.assign({}, out.state.onRepeat||{}, S.state.onRepeat); S.state.ruleOff = Object.assign({}, out.state.ruleOff||{}, S.state.ruleOff); S.state.modes = Object.assign({}, out.state.modes||{}, S.state.modes);
+    S.state.dormant = Object.assign({}, out.state.dormant||{}, S.state.dormant); S.state.wearSoon = Object.assign({}, out.state.wearSoon||{}, S.state.wearSoon); S.state.since = [out.state.since, S.state.since].filter(Boolean).sort()[0] || null;
   }
   if(out.trips && out.trips.trips){
     const byId = {}; out.trips.trips.forEach(t=>byId[t.id]=t);
@@ -1036,7 +1038,7 @@ function queuePush(what){
     const w = queuePush.what; queuePush.what = {};
     try{
       if(w.log) await ghPut('data/wearlog.json', {entries:S.log.filter(e=>e.source!=='sample')}, 'Log what I wore');
-      if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes}, 'Update day settings');
+      if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes, dormant:S.state.dormant, wearSoon:S.state.wearSoon, since:S.state.since}, 'Update day settings');
       if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
       if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
       if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; if(cur.data && cur.data.feedback){ const fm = {}; [...cur.data.feedback, ...(S.vision.feedback||[])].forEach(f=>fm[f.id]=f); S.vision.feedback = Object.values(fm).sort((a,b)=>a.at-b.at).slice(-150); } await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
@@ -1209,6 +1211,7 @@ function doubles(){
   return Object.values(g).filter(a=>a.length>1);
 }
 function viewCloset(filter){
+  if(filter==='more') return viewMore();
   const st = stats(), all = closet();
   const live = p => !p.dontWear && statusOf(p)!=='donate';
   const neglected = p => { const l = st[p.id].last; return live(p) && l && daysBetween(l, TODAY) >= 60 && !onRepeatSince(p.id); };
@@ -1241,9 +1244,99 @@ function viewCloset(filter){
     body = `<div class="group">${list.length ? `<div class="grid">${list.map(item).join('')}</div>` : `<p class="empty">${empty}</p>`}</div>`;
   }
   return `${masthead()}
-  <header class="pagehead"><h1 class="page">Closet</h1><p class="lede">${lede}</p></header>
+  <header class="pagehead withlink"><h1 class="page">Closet</h1><a class="toplink" href="#closet/more"><span class="label">Get more from it</span></a><p class="lede">${lede}</p></header>
   <div class="filters" role="toolbar" aria-label="Filter the closet">${filters}</div>
   ${body}`;
+}
+
+/* ---------------- get more from what you own ----------------
+   Partners: what a piece combines well with, by the same tests the outfit builder uses.
+   Orphans have two partners or fewer. Before buying, a described piece is counted the same way. */
+const COLOUR_CHIPS = [['black','#1E1E1E'],['white','#F2F0EA'],['cream','#E9E0CC'],['grey','#9A9A9A'],['navy','#1C2440'],['denim','#5B7393'],['camel','#B8915F'],['brown','#5E4330'],['burgundy','#5C1A2B'],['red','#B2262E'],['pink','#E3A9B8'],['purple','#6E4D8E'],['blue','#2F5BA8'],['green','#3F6B48'],['khaki','#7A7346'],['yellow','#D9B43A'],['orange','#D4702C']];
+const BUY_CATS = [['top','Top'],['bottom','Trousers or skirt'],['dress','Dress'],['outer','Coat or jacket'],['shoes','Shoes']];
+const BUY_PATTERNS = [['none','Plain'],['small','Small print'],['medium','Medium print'],['large','Bold print']];
+const livePiece = p => !p.dontWear && statusOf(p)!=='donate';
+function compat(a, b){
+  if(pairAvoid(a.id, b.id)) return false;
+  if(patterned(a) && patterned(b) && printClash([a, b])) return false;
+  const na = NEUTRAL.test(a.colour||''), nb = NEUTRAL.test(b.colour||'');
+  if(!na && !nb && !hueClose(a, b)){ const x = hueOf(a.hex), y = hueOf(b.hex); const d = x==null||y==null ? 0 : Math.min(Math.abs(x-y), 360-Math.abs(x-y)); if(d < 150) return false; }
+  if(proportionClash(a, b) >= 2 || proportionClash(b, a) >= 2) return false;
+  const oa = a.occasions||[], ob = b.occasions||[]; if(oa.length && ob.length && !oa.some(o=>ob.includes(o))) return false;
+  if(Math.abs((a.formality||2)-(b.formality||2)) > 2) return false;
+  if(Math.abs(warmthOf(a)-warmthOf(b)) >= 3) return false;
+  return true;
+}
+const PARTNER_CATS = {top:['bottom'], bottom:['top'], dress:['outer','shoes'], outer:['top','dress'], shoes:['bottom','dress']};
+function partnersOf(p, pool){
+  pool = pool || closet().filter(livePiece);
+  const cats = PARTNER_CATS[p.cat] || []; return pool.filter(q=>q.id!==p.id && cats.includes(q.cat) && compat(p, q));
+}
+// Hardest to wear: tops and bottoms that pair with less than half of what a typical one in their category does.
+function partnerStats(){
+  if(S.ui.memo.pstats) return S.ui.memo.pstats;
+  const pool = closet().filter(livePiece), all = {}, median = {};
+  ['top','bottom','dress','outer','shoes'].forEach(c=>{ const xs = pool.filter(p=>p.cat===c).map(p=>({p, partners: partnersOf(p, pool)})); all[c] = xs;
+    const ns = xs.map(x=>x.partners.length).sort((a,b)=>a-b); median[c] = ns.length ? ns[Math.floor(ns.length/2)] : 0; });
+  return (S.ui.memo.pstats = {all, median});
+}
+function orphans(){
+  const {all, median} = partnerStats();
+  return ['top','bottom'].flatMap(c=>all[c].filter(x=>x.partners.length <= median[c]*.5).map(x=>Object.assign({median: median[c]}, x))).sort((a,b)=>a.partners.length/a.median - b.partners.length/b.median);
+}
+const virtualPiece = d => ({id:'__new', name:'the new piece', cat:d.cat, shape:{top:'tee',bottom:'trou',dress:'dress',outer:'coat',shoes:'flat'}[d.cat], colour:d.colour, hex:(COLOUR_CHIPS.find(c=>c[0]===d.colour)||[])[1], pattern:d.pattern, fit:'regular', occasions:['office','customer','off'], warmth:2, formality:2, styleTags:[]});
+// The plain piece that would pair with the most orphans: the gap worth filling first.
+function rescueFor(p){
+  const want = p.cat==='top' ? 'bottom' : 'top', best = [];
+  COLOUR_CHIPS.forEach(([c])=>{ const v = virtualPiece({cat:want, colour:c, pattern:'none'}); if(compat(p, v)) best.push(c); });
+  // Only colours she doesn't already have as a plain piece of that kind: those would be new partners.
+  const SYN = {ecru:'cream', ivory:'cream', oyster:'cream', stone:'cream', beige:'cream', sand:'camel', tan:'camel', charcoal:'grey', gray:'grey', indigo:'denim', wine:'burgundy', plum:'purple', lilac:'purple', mauve:'purple', blush:'pink', rose:'pink', olive:'khaki', sage:'green', cobalt:'blue', rust:'orange'};
+  const norm = c => { c = (c||'').toLowerCase(); Object.entries(SYN).forEach(([k,v])=>{ if(c.includes(k)) c += ' '+v; }); return c; };
+  const owned = new Set(closet().filter(q=>livePiece(q) && q.cat===want && (!q.pattern || q.pattern==='none')).map(q=>norm(q.colour)));
+  const fresh = best.filter(c=>![...owned].some(o=>o.includes(c))).sort((a,b)=>(NEUTRAL.test(b)?1:0)-(NEUTRAL.test(a)?1:0));
+  return fresh.length ? `A plain ${fresh.slice(0,2).join(' or ')} ${want==='top'?'top':'bottom'} would give it a new partner.` : '';
+}
+function buyVerdict(d){
+  const v = virtualPiece(d), pool = closet().filter(livePiece);
+  const looks = partnersOf(v, pool).length, rescued = orphans().filter(o=>compat(o.p, v) && (PARTNER_CATS[o.p.cat]||[]).includes(v.cat));
+  const SYN2 = {ecru:'cream', ivory:'cream', oyster:'cream', stone:'cream', charcoal:'grey', indigo:'denim', wine:'burgundy', blush:'pink', olive:'khaki', sage:'green', cobalt:'blue', tan:'camel'};
+  const alike = pool.filter(p=>{ let c = (p.colour||'').toLowerCase(); Object.entries(SYN2).forEach(([k,x])=>{ if(c.includes(k)) c += ' '+x; }); return p.cat===v.cat && c.includes(v.colour) && (p.pattern||'none')===(v.pattern||'none'); });
+  const med = partnerStats().median[v.cat] || 1;
+  const verdict = alike.length>=3 ? 'Probably not' : rescued.length>=2 || (looks>=med && alike.length<=1) ? 'Worth it' : looks>=med*.6 ? 'Maybe' : 'Probably not';
+  return {looks, rescued, alike, verdict, med};
+}
+// Not worn in six months: what she says, plus the log once it has six months in it.
+const soonOn = (id, date) => { const t = S.state.wearSoon && S.state.wearSoon[id]; if(!t) return false; const l = stats()[id] && stats()[id].last; return daysBetween(t, date) >= 0 && daysBetween(t, date) <= 10 && !(l && l >= t); };
+function dormantList(){
+  const st = stats(), since = S.state.since || TODAY, longEnough = daysBetween(since, TODAY) >= 180;
+  return closet().filter(livePiece).filter(p=>{ const l = st[p.id] && st[p.id].last, mark = S.state.dormant && S.state.dormant[p.id];
+    if(mark) return !(l && l >= mark);
+    return longEnough && !onRepeatSince(p.id) && (!l || daysBetween(l, TODAY) >= 180); });
+}
+function viewMore(){
+  if(!S.state.since){ S.state.since = TODAY; queuePush({state:true}); }
+  const os = orphans(), d = S.ui.buy || (S.ui.buy = {cat:'top', colour:'black', pattern:'none'}), bv = buyVerdict(d);
+  const dl = dormantList(), since = S.state.since, left = 180 - daysBetween(since, TODAY);
+  const orphanRow = ({p, partners, median}) => `<li><button type="button" class="th" data-piece="${esc(p.id)}">${art(p)}</button><span class="body"><span class="nm">${esc(p.name)}</span><span class="sub">Pairs with ${partners.length} ${p.cat==='top'?'bottom':'top'}${partners.length===1?'':'s'}; a typical ${p.cat==='top'?'top':'bottom'} pairs with ${median}.${partners.length && partners.length<=3 ? ` Best with the ${esc(partners.map(q=>q.name.toLowerCase()).join(' and '))}.` : ''} ${esc(rescueFor(p))}</span></span></li>`;
+  const dormRow = p => `<li><button type="button" class="th" data-piece="${esc(p.id)}">${art(p)}</button><span class="body"><span class="nm">${esc(p.name)}</span><span class="acts-inline">${soonOn(p.id, TODAY) ? '<span class="sub">In this week’s looks</span>' : `<button type="button" class="linkish" data-act="wearsoon" data-id="${esc(p.id)}">Wear it this week</button>`}<button type="button" class="linkish" data-act="letgo" data-id="${esc(p.id)}">Let it go</button><button type="button" class="linkish" data-act="keepit" data-id="${esc(p.id)}">Keep</button></span></span></li>`;
+  return `${masthead()}
+  <header class="pagehead withlink"><h1 class="page">Get more from it</h1><a class="toplink" href="#closet"><span class="label">Closet</span></a><p class="lede">Pieces that struggle to make a look, what would really help before you buy, and what has been sitting still.</p></header>
+  <section class="panel"><span class="cap">Hardest to wear <span class="n">${os.length}</span></span><p class="caption pad">Tops and bottoms that pair with less than half of what a typical one does, by the same rules the daily looks use. Find them a partner, style them differently, or let them go.</p>
+    ${os.length ? `<ul class="more-list">${os.map(orphanRow).join('')}</ul>` : '<p class="caption pad">None. Everything pairs with a fair share of your closet.</p>'}</section>
+  <section class="panel"><span class="cap">Before you buy</span><p class="caption pad">Describe the piece. The app counts how many pieces it would pair with, which hard-to-wear pieces it would help, and how many like it you already own.</p>
+    <div class="field"><span class="cap">What is it?</span></div>${tagChips(BUY_CATS, [d.cat], 'data-buycat')}
+    <div class="field"><span class="cap">Colour</span></div><div class="swatches" role="group" aria-label="Colour">${COLOUR_CHIPS.map(([c,h])=>`<button type="button" class="sw" data-buycol="${c}" aria-pressed="${d.colour===c}" aria-label="${c}" style="background:${h}"></button>`).join('')}</div>
+    <div class="field"><span class="cap">Pattern</span></div>${tagChips(BUY_PATTERNS, [d.pattern], 'data-buypat')}
+    <div class="verdict pad"><span class="big-n">${bv.looks}</span><span><strong>${esc(bv.verdict)}.</strong> A ${esc(d.colour)} ${esc(d.pattern==='none'?'plain':(BUY_PATTERNS.find(x=>x[0]===d.pattern)||[])[1].toLowerCase())} ${esc((BUY_CATS.find(x=>x[0]===d.cat)||[])[1].toLowerCase())} would pair with ${bv.looks} piece${bv.looks===1?'':'s'} you own; a typical one pairs with ${bv.med}.${bv.rescued.length ? ` It helps ${bv.rescued.length===1?'a hard-to-wear piece':bv.rescued.length+' hard-to-wear pieces'}: ${esc(bv.rescued.slice(0,3).map(o=>o.p.name.toLowerCase()).join(', '))}.` : ''}${bv.alike.length ? ` You already own ${bv.alike.length} like it.` : ''}</span></div>
+    <p class="caption pad">A rough count from colour, print, proportion and occasion. It can't see fabric or cut, so treat it as a second opinion.</p></section>
+  <section class="panel"><span class="cap">Not worn in six months <span class="n">${dl.length}</span></span>
+    <p class="caption pad">${left>0 ? `The app has only been watching since ${esc(nice(since))}, so it can't tell yet. It will add its own list in ${left} days. Until then, mark what you know you haven't worn.` : 'Pieces not worn in six months, plus any you have marked.'}</p>
+    ${dl.length ? `<ul class="more-list">${dl.map(dormRow).join('')}</ul>` : ''}
+    <div class="acts"><button type="button" class="btn ghost" data-act="markdormant">Mark what I haven't worn</button></div></section>`;
+}
+function sheetDormant(){
+  const groups = [['top','Tops and knits'],['bottom','Trousers and skirts'],['dress','Dresses'],['outer','Outerwear'],['shoes','Shoes'],['accessory','Scarves and belts'],['bag','Bags']].map(([c,l])=>{ const xs = closet().filter(p=>p.cat===c && livePiece(p)); return xs.length ? `<section class="group"><h2 class="sec">${l}</h2><ul class="picklist packlist">${xs.map(p=>`<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(p.colour||'')}</span></span><input type="checkbox" class="check" data-dormant="${esc(p.id)}" ${S.state.dormant && S.state.dormant[p.id]?'checked':''} aria-label="${esc(p.name)}"></label></li>`).join('')}</ul></section>` : ''; }).join('');
+  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Not worn in six months</span><button type="button" class="linkish" data-close>Done</button></div><p class="caption pad" style="margin:12px 0 0">Tick anything you haven't worn since spring. Wearing it clears the mark.</p>${groups}`);
 }
 
 function reactionsHTML(date){
@@ -1914,6 +2007,7 @@ document.addEventListener('click', async e=>{
     return; }
   if(t.dataset.tryv!==undefined && S.ui.try){ const v = t.dataset.tryv==='1'; S.ui.try.verdict = S.ui.try.verdict===v ? null : v; refreshTry(); return; }
   if(t.dataset.tryoff && S.ui.try){ const k = t.dataset.tryoff, a = S.ui.try.off||[]; S.ui.try.off = a.includes(k) ? a.filter(x=>x!==k) : [...a, k]; refreshTry(); return; }
+  if(t.dataset.buycat || t.dataset.buycol || t.dataset.buypat){ const b = S.ui.buy; if(t.dataset.buycat) b.cat = t.dataset.buycat; if(t.dataset.buycol) b.colour = t.dataset.buycol; if(t.dataset.buypat) b.pattern = t.dataset.buypat; render(); return; }
   if(t.dataset.love){ toggleLove(t.dataset.love); return; }
   if(t.dataset.vfb){ const ok = tapMatch(t.dataset.ref, t.dataset.id, t.dataset.vfb==='1', t.dataset.region); render(); toast(ok===true ? 'Right. It will find this one more easily.' : ok===false ? "Got it. It won't suggest that here, or for pictures like it." : 'Cleared'); return; }
   if(t.dataset.mode){ S.state.modes[t.dataset.date] = t.dataset.mode; delete S.state.swaps[t.dataset.date]; queuePush({state:true}); render(); toast(MODES[t.dataset.mode]); return; }
@@ -1946,6 +2040,10 @@ document.addEventListener('click', async e=>{
     sheetTryOn(t.dataset.date); return;
   }
   if(act==='tryonsave'){ await saveTryon(); return; }
+  if(act==='markdormant'){ sheetDormant(); return; }
+  if(act==='wearsoon'){ S.state.wearSoon[t.dataset.id] = TODAY; S.ui.memo = {}; queuePush({state:true}); render(); toast('It will come up in this week’s looks'); return; }
+  if(act==='keepit'){ S.state.dormant[t.dataset.id] = null; queuePush({state:true}); render(); toast('Kept, and off this list'); return; }
+  if(act==='letgo'){ const k = 'letgo/'+t.dataset.id; if(S.ui.confirmRm!==k){ S.ui.confirmRm = k; t.textContent = 'Tap again to mark for donating'; return; } S.ui.confirmRm = null; setStatus(t.dataset.id, 'donate'); return; }
   if(act==='trycopy'){ const ta = $('#tryprompt'); toast(await copyText(ta ? ta.value : (S.ui.try||{}).prompt || '') ? 'Prompt copied' : 'Press and hold the text to copy it'); return; }
   if(act==='tryimgcopy'){
     const tr = S.ui.try; if(!tr || !tr.cv) return;
@@ -2078,6 +2176,7 @@ document.addEventListener('change', async e=>{
   if(el.dataset.pack){ togglePack(el.dataset.trip, el.dataset.pack, el.checked); return; }
   if(el.dataset.lookpick && S.ui.look){ const d = S.ui.look, id = el.dataset.lookpick; d.items = el.checked ? [...new Set([...d.items, id])] : d.items.filter(x=>x!==id); render(); return; }
   if(el.id==='plove'){ toggleLove(el.dataset.id); return; }
+  if(el.dataset.dormant){ S.state.dormant[el.dataset.dormant] = el.checked ? TODAY : null; queuePush({state:true}); render(); return; }
   if(el.id==='tryresult' && el.files[0] && S.ui.try){ const ph = await readPhoto(el.files[0]); if(!ph){ toast("That picture couldn't be read."); return; } S.ui.try.res = ph; refreshTry(); return; }
   if(el.id==='ownphoto' && el.files[0]){
     const f = el.files[0], ph = await readPhoto(f); if(!ph){ toast("That photo couldn't be read."); return; }
