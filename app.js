@@ -1818,9 +1818,12 @@ function miniLay(o, heroId){
   return `<div class="mini-lay" role="img" aria-label="${esc(o.list.map(({p})=>p.name).join(', '))}">${o.list.map(({slot,p})=>{ const pos = L[slot] || LAYOUT[slot]; if(!pos) return '';
     return `<span class="piece slot-${slot}${p.id===heroId?' hero-piece':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;z-index:${pos.z||1}">${art(p)}</span>`; }).join('')}</div>`;
 }
-function sheetWith(id, round){
+async function sheetWith(id, round){
   const p = piece(id); if(!p) return;
   const {looks, label, occ} = looksWith(id, round);
+  // The sheet doesn't redraw when a photo arrives, so fetch them all first (a few seconds at most).
+  const paths = [...new Set(looks.flatMap(o=>o.list.map(x=>x.p.photo)).concat(p.photo).filter(x=>x && !S.photos[x]))];
+  if(paths.length && ghReady()) await Promise.race([Promise.all(paths.map(photoURL)), new Promise(r=>setTimeout(r, 6000))]);
   S.ui.withLooks = looks;
   const card = (o, i) => `<li class="wl">${miniLay(o, id)}
     <span class="names">${esc(o.list.map(({p:q})=>q.name).join(', '))}.</span>
