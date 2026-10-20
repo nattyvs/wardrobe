@@ -1206,16 +1206,48 @@ async function ghSend(path, message, content, withSha){
 }
 const ghPut = (path, data, message) => ghSerial(async()=>{ const j = await ghSend(path, message, b64enc(JSON.stringify(data,null,2)+'\n'), true); S.sha[path] = j.content.sha; });
 const ghPutRaw = (path, b64, message) => ghSerial(()=>ghSend(path, message, b64, false));
+/* Offline support. Photos are kept in Cache Storage so the closet looks the same without a connection, and photos taken offline
+   wait in an outbox there until GitHub can be reached. Both caches are named apart from the app shell, so a new release keeps them. */
+const PHOTO_DAYS = 7; // a kept photo is looked at again after this many days, in case it was replaced on GitHub
+const store = async (name, key, body, headers) => { try{ const c = await caches.open(name); await c.put('/__'+name+'/'+key, new Response(body, {headers:headers||{}})); }catch(e){} };
+const fetchStored = async (name, key) => { try{ const c = await caches.open(name); return await c.match('/__'+name+'/'+key); }catch(e){ return null; } };
+const dropStored = async (name, key) => { try{ const c = await caches.open(name); await c.delete('/__'+name+'/'+key); }catch(e){} };
+async function uploadPhoto(path, b64, message){
+  try{ await ghPutRaw(path, b64, message); }
+  catch(e){ await store('wd-outbox', path, b64, {'x-message':message}); toast('No connection. The photo will upload when you are back online.'); }
+  return path;
+}
+async function flushOutbox(){
+  if(flushOutbox.busy || !ghReady() || !navigator.onLine) return; flushOutbox.busy = true;
+  try{
+    const c = await caches.open('wd-outbox');
+    for(const req of await c.keys()){
+      const res = await c.match(req), path = decodeURIComponent(new URL(req.url).pathname.replace('/__wd-outbox/',''));
+      try{ await ghPutRaw(path, await res.text(), res.headers.get('x-message') || 'Photo'); await c.delete(req); }catch(e){ break; }
+    }
+  }catch(e){} finally{ flushOutbox.busy = false; }
+}
 async function loadPhoto(path){
   if(S.photos[path] || loadPhoto.busy[path]) return; loadPhoto.busy[path] = true;
   try{
-    const r = await fetch(ghURL(path), {headers:ghHeaders({Accept:'application/vnd.github.raw'})});
-    if(!r.ok) throw 0;
-    S.photos[path] = URL.createObjectURL(await r.blob());
+    let blob = null, kept = null;
+    const waiting = await fetchStored('wd-outbox', path);
+    if(waiting) blob = await b64Blob(await waiting.text());
+    else{
+      kept = await fetchStored('wd-photos', path);
+      const stale = !kept || (Date.now() - (+kept.headers.get('x-at')||0)) > PHOTO_DAYS*864e5;
+      if(kept) blob = await kept.clone().blob();
+      if(stale && ghReady() && navigator.onLine){
+        try{ const r = await fetch(ghURL(path), {headers:ghHeaders({Accept:'application/vnd.github.raw'})}); if(r.ok){ const b = await r.blob(); blob = b; await store('wd-photos', path, b, {'x-at':String(Date.now()), 'content-type':b.type||'image/webp'}); } }catch(e){}
+      }
+    }
+    if(!blob) throw 0;
+    S.photos[path] = URL.createObjectURL(blob);
     document.querySelectorAll('#sheet svg[data-ph]').forEach(el=>{ if(el.getAttribute('data-ph')!==path) return; const im = document.createElement('img'); im.src = S.photos[path]; im.alt = el.getAttribute('data-alt')||''; el.replaceWith(im); });
     render();
   }catch(e){} finally{ delete loadPhoto.busy[path]; }
 }
+const b64Blob = async b64 => { const bin = atob(b64.replace(/\s/g,'')), a = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return new Blob([a], {type:'image/jpeg'}); };
 loadPhoto.busy = {};
 async function pull(){
   if(!ghReady()) return;
@@ -1281,16 +1313,18 @@ let pushTimer = null, pushChain = Promise.resolve(), pushFails = 0;
 function editPiece(id, patch){ S.state.edits[id] = Object.assign({}, S.state.edits[id], patch); }
 function queuePush(what){
   persist();
+  LS.set('wd.pending', Object.assign(LS.get('wd.pending', {}), what));
   if(!ghReady()) return;
   queuePush.what = Object.assign(queuePush.what||{}, what);
   clearTimeout(pushTimer);
   pushTimer = setTimeout(schedulePush, 900);
 }
 // One push at a time: a second one starting while the first is still running is what made GitHub answer 409.
-function schedulePush(){ pushChain = pushChain.then(runPush).catch(()=>{}); }
+function schedulePush(){ if(!navigator.onLine){ updateNet(); return; } pushChain = pushChain.then(runPush).catch(()=>{}); }
 async function runPush(){
   const w = queuePush.what || {}; queuePush.what = {};
   if(!Object.keys(w).length) return;
+  LS.set('wd.pending', {}); // put back below if the push fails
   try{
     if(w.log) await ghPut('data/wearlog.json', {entries:S.log.filter(e=>e.source!=='sample')}, 'Log what I wore');
     if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes, dormant:S.state.dormant, wearSoon:S.state.wearSoon, since:S.state.since}, 'Update day settings');
@@ -1305,12 +1339,13 @@ async function runPush(){
       if(theirs.checks) S.style.checks = theirs.checks;
       await ghPut('data/style.json', Object.assign({}, theirs, S.style), 'Update style notes');
     }
-    S.synced = Date.now(); persist(); pushFails = 0;
+    S.synced = Date.now(); persist(); pushFails = 0; flushOutbox(); updateNet();
   }catch(e){
     // Put the work back and try again shortly, a few times, so a busy moment on GitHub never loses a change.
-    queuePush.what = Object.assign({}, w, queuePush.what||{});
+    queuePush.what = Object.assign({}, w, queuePush.what||{}); LS.set('wd.pending', queuePush.what);
     if(++pushFails <= 3){ clearTimeout(pushTimer); pushTimer = setTimeout(schedulePush, 4000*pushFails); }
-    else { pushFails = 0; toast((e.message || 'Saved here.') + ' It is kept on this phone and will sync with the next change.'); }
+    else { pushFails = 0; toast((e.message || 'Saved here.') + ' It is kept on this phone and will sync when it can.'); }
+    updateNet();
   }
 }
 
@@ -2526,7 +2561,7 @@ async function saveTryon(){
   if(tr.verdict==null){ toast('Love it, not sure, or not for you?'); return; }
   const id = 'try-'+Date.now().toString(36), date = isoDate(tr.date) ? tr.date : TODAY;
   const x = {id, added:Date.now(), updated:Date.now(), date, items:tr.items, verdict: tr.verdict==='m' ? 'm' : tr.verdict ? 'y' : 'n', off: tr.verdict===false ? (tr.off||[]) : [], preview: tr.res.preview, f: tr.sc ? tr.sc.f : null};
-  if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, tr.res.b64, 'A try-on from ChatGPT'); x.photo = path; }catch(err){ toast(err.message); } }
+  if(ghReady()){ const path = `data/style/${id}.jpg`; x.photo = await uploadPhoto(path, tr.res.b64, 'A try-on from ChatGPT'); }
   S.style.tryons = [x, ...(S.style.tryons||[])];
   // Not sure yet teaches the app nothing until you settle it.
   if(tr.sc && tr.verdict!=='m'){ S.style.ratings = (S.style.ratings||[]).concat([{date, items:tr.items, y:tr.verdict, mode:'tryon', src:'tryon', ref:id, f:tr.sc.f, at:Date.now()}]); learnFrom(tr.sc, tr.verdict, 0.04); }
@@ -2750,7 +2785,7 @@ document.addEventListener('click', async e=>{
     const d = t.dataset.date, items = currentPicks();
     const fb = document.querySelector('[data-feel][aria-pressed="true"]');
     const patch = {items, source:'tick', feel: fb ? fb.dataset.feel : null, note: ($('#lognote')||{}).value || ''};
-    if(S.ui.photo){ patch.photoPreview = S.ui.photo.preview; if(ghReady()){ const path = `data/inbox/mirror-${d}-${Date.now()}.jpg`; try{ await ghPutRaw(path, S.ui.photo.b64, `Mirror photo ${d}`); patch.photo = path; }catch(err){ toast(err.message); } } S.ui.photo = null; }
+    if(S.ui.photo){ patch.photoPreview = S.ui.photo.preview; if(ghReady()){ const path = `data/inbox/mirror-${d}-${Date.now()}.jpg`; patch.photo = await uploadPhoto(path, S.ui.photo.b64, `Mirror photo ${d}`); } S.ui.photo = null; }
     upsertLog(d, patch); S.state.logExtra = '';
     const tro = patch.photoPreview && tryonFor(items);
     if(tro){ tro.wornOn = d; tro.updated = Date.now(); queuePush({style:true}); }
@@ -2770,14 +2805,14 @@ document.addEventListener('click', async e=>{
   else if(act==='savelook'){
     const d = S.ui.look; if(!d || !d.items.length){ toast('Tick at least one piece'); return; }
     const id = 'look-'+Date.now().toString(36), x = {id, added:Date.now(), updated:Date.now(), date:TODAY, items:d.items, tags:d.tags, occ:d.occ, note:d.note.trim()};
-    if(d.photo){ x.preview = d.photo.preview; if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, d.photo.b64, 'A look I loved'); x.photo = path; }catch(err){ toast(err.message); } } }
+    if(d.photo){ x.preview = d.photo.preview; if(ghReady()){ const path = `data/style/${id}.jpg`; x.photo = await uploadPhoto(path, d.photo.b64, 'A look I loved'); } }
     S.style.looks = [x, ...(S.style.looks||[])]; S.ui.look = null; S.ui.lookCat = null;
     queuePush({style:true}); location.hash = '#style'; toast('Look saved');
   }
   else if(act==='saveinspo'){
     const d = S.ui.inspo; if(!d || (!d.photo && !d.url.trim())){ toast('Add a picture or a link'); return; }
     const id = 'inspo-'+Date.now().toString(36), x = {id, added:Date.now(), updated:Date.now(), url:d.url.trim(), tags:d.tags, note:d.note.trim()};
-    if(d.photo){ x.preview = d.photo.preview; if(ghReady()){ const path = `data/style/${id}.jpg`; try{ await ghPutRaw(path, d.photo.b64, 'Inspiration'); x.photo = path; }catch(err){ toast(err.message); } } }
+    if(d.photo){ x.preview = d.photo.preview; if(ghReady()){ const path = `data/style/${id}.jpg`; x.photo = await uploadPhoto(path, d.photo.b64, 'Inspiration'); } }
     S.style.inspo = [x, ...(S.style.inspo||[])]; S.ui.inspo = null;
     queuePush({style:true}); location.hash = '#style'; toast('Saved');
     if(x.preview) runInspoMatch(x.id);
@@ -2902,6 +2937,27 @@ function upsertLog(date, patch){
   S.log.sort((a,b)=>a.date.localeCompare(b.date));
 }
 
+/* ---------------- offline / back online ---------------- */
+function waitingCount(){ return Object.keys(Object.assign({}, LS.get('wd.pending', {}), queuePush.what||{})).length; }
+function updateNet(){
+  document.body.classList.toggle('offline', !navigator.onLine);
+  const n = waitingCount(); let el = document.getElementById('netnote');
+  if(navigator.onLine && !n){ if(el) el.remove(); return; }
+  if(!el){ el = document.createElement('p'); el.id = 'netnote'; el.className = 'netnote'; el.setAttribute('role','status'); document.body.appendChild(el); }
+  el.textContent = navigator.onLine ? 'Syncing changes.' : (n ? 'Offline. Changes are kept on this phone and will sync later.' : 'Offline. Everything you see is kept on this phone.');
+}
+let syncing = false;
+async function syncNow(quiet){
+  if(syncing || !ghReady() || !navigator.onLine) return; syncing = true;
+  try{
+    if(Object.keys(queuePush.what||{}).length || Object.keys(LS.get('wd.pending', {})).length){ queuePush.what = Object.assign(LS.get('wd.pending', {}), queuePush.what||{}); await pushChain.then(runPush).catch(()=>{}); }
+    await flushOutbox(); await pull(); await loadWeather(); render(); if(!quiet) toast('Back online. Synced.');
+  }catch(e){} finally{ syncing = false; updateNet(); }
+}
+window.addEventListener('online', ()=>{ updateNet(); syncNow(); });
+window.addEventListener('offline', updateNet);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && navigator.onLine && S.synced && Date.now()-S.synced > 10*60e3) syncNow(true); });
+
 /* ---------------- boot ---------------- */
 window.addEventListener('hashchange', ()=>{ closeSheet(); if(!isTripForm(route())){ S.ui.draft = null; S.ui.draftKey = null; S.ui.confirmDel = null; } render({settle: route().name==='today' || route().name==='day'}); window.scrollTo(0,0); });
 async function boot(){
@@ -2909,9 +2965,14 @@ async function boot(){
   if(!S.weather || S.weather.city!==settings.city) S.weather = sampleWeather();
   render({settle:true});
   await loadWeather();
-  if(ghReady()){ try{ await pull(); }catch(e){ toast(e.message); } }
+  const waiting = LS.get('wd.pending', {});
+  if(Object.keys(waiting).length){ queuePush.what = Object.assign(waiting, queuePush.what||{}); }
+  // Pull first, so pieces changed elsewhere arrive, then send what was waiting: pushes re-read GitHub before writing.
+  if(ghReady() && navigator.onLine){ try{ await pull(); }catch(e){ if(navigator.onLine) toast(e.message); } }
   persist();
   render();
+  if(Object.keys(queuePush.what||{}).length) schedulePush();
+  flushOutbox(); updateNet();
   upcomingTrips().forEach(ensureTripWeather);
 }
 if('serviceWorker' in navigator && location.protocol==='https:'){
