@@ -1254,7 +1254,31 @@ async function pull(){
   }
   S.synced = Date.now(); persist();
 }
+// Fetch the closet from GitHub, apply only our pending patches, write with that sha. If GitHub refuses (someone else
+// committed in between), fetch again and re-apply, rather than resending an old copy.
+const pushCloset = () => ghSerial(async()=>{
+  const sent = JSON.parse(JSON.stringify(S.state.edits));
+  for(let attempt=0; ; attempt++){
+    const cur = await ghGet('data/closet.json');
+    if(!cur.data || !cur.data.pieces) return; // never write a closet we couldn't read
+    const fresh = cur.data.pieces.map(p=>sent[p.id] ? Object.assign({}, p, sent[p.id]) : p);
+    const body = {message:'Update closet', content:b64enc(JSON.stringify(Object.assign({}, cur.data, {pieces:fresh}), null, 2)+'\n'), sha:cur.sha};
+    const r = await fetch(ghURL('data/closet.json'), {method:'PUT', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify(body)});
+    if(r.ok){
+      S.sha['data/closet.json'] = (await r.json()).content.sha;
+      // Patches that reached GitHub are done; one changed meanwhile stays queued. The screen shows what GitHub now holds.
+      Object.keys(sent).forEach(id=>{ if(JSON.stringify(S.state.edits[id])===JSON.stringify(sent[id])) delete S.state.edits[id]; });
+      S.closet = fresh.map(p=>Object.assign({}, p, S.state.edits[p.id]||{}));
+      return;
+    }
+    if(!(r.status===409 || r.status===422) || attempt>=2) throw new Error(`Couldn't save the closet (${r.status}).`);
+    await sleep(600*(attempt+1));
+  }
+});
 let pushTimer = null, pushChain = Promise.resolve(), pushFails = 0;
+// A closet change is kept as a small patch per piece (S.state.edits) until it has reached GitHub. The push below applies only
+// these patches to the file as it is on GitHub right now, so pieces added elsewhere are never lost by a stale copy here.
+function editPiece(id, patch){ S.state.edits[id] = Object.assign({}, S.state.edits[id], patch); }
 function queuePush(what){
   persist();
   if(!ghReady()) return;
@@ -1270,7 +1294,7 @@ async function runPush(){
   try{
     if(w.log) await ghPut('data/wearlog.json', {entries:S.log.filter(e=>e.source!=='sample')}, 'Log what I wore');
     if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes, dormant:S.state.dormant, wearSoon:S.state.wearSoon, since:S.state.since}, 'Update day settings');
-    if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
+    if(w.closet) await pushCloset();
     if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
     if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; if(cur.data && cur.data.feedback){ const fm = {}; [...cur.data.feedback, ...(S.vision.feedback||[])].forEach(f=>fm[f.id]=f); S.vision.feedback = Object.values(fm).sort((a,b)=>a.at-b.at).slice(-150); } await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
     if(w.style){
@@ -2543,7 +2567,7 @@ function toggleRepeat(id){
 }
 function setStatus(id, status){
   const p = piece(id); if(!p) return;
-  p.status = status; S.state.edits[id] = Object.assign({}, S.state.edits[id], {status});
+  p.status = status; editPiece(id, {status});
   queuePush({closet:true});
   document.querySelectorAll('[data-status]').forEach(b=>b.setAttribute('aria-pressed', b.dataset.status===status ? 'true' : 'false'));
   render(); toast(STATUS[status]);
@@ -2740,7 +2764,7 @@ document.addEventListener('click', async e=>{
     shapeGroups(p).forEach(k=>{ const on = [...document.querySelectorAll(`[data-shape="${k}"][aria-pressed="true"]`)].map(b=>b.dataset.v); patch[k] = SHAPE[k].multi ? on : (on[0]||null); });
     const changed = shapeGroups(p).some(k=>JSON.stringify(patch[k]||null)!==JSON.stringify(p[k]||null)) || patch.brand!==(p.brand||'') || patch.composition!==(p.composition||'');
     if(changed){ patch.shapeChecked = true; patch.labelAt = Date.now(); }
-    Object.assign(p, patch); S.state.edits[p.id] = Object.assign({}, S.state.edits[p.id], patch);
+    Object.assign(p, patch); editPiece(p.id, patch);
     queuePush({closet:true}); closeSheet(); render(); toast('Saved');
   }
   else if(act==='savelook'){
@@ -2768,7 +2792,7 @@ document.addEventListener('click', async e=>{
   }
   else if(act==='laundry'){
     const ws = closet().filter(p=>statusOf(p)==='wash');
-    ws.forEach(p=>{ p.status = 'available'; S.state.edits[p.id] = Object.assign({}, S.state.edits[p.id], {status:'available'}); });
+    ws.forEach(p=>{ p.status = 'available'; editPiece(p.id, {status:'available'}); });
     queuePush({closet:true}); render(); toast(`${ws.length} back in the wardrobe`);
   }
   else if(act==='undorule'){
