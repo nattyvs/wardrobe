@@ -70,10 +70,19 @@ function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('sh
 function closet(){ return S.closet || []; }
 function log(){ return S.log || []; }
 function piece(id){ return closet().find(p=>p.id===id); }
+/* Reversible garments: two closet entries, one per side, pointing at each other with sameAs. They are one physical garment, so
+   wears, rest days, On repeat and packing treat the pair as one. */
+function twinOf(p){ if(!p) return null; return (p.sameAs && piece(p.sameAs)) || closet().find(q=>q.sameAs===p.id) || null; }
+const sidesOf = id => { const p = piece(id), t = twinOf(p); return t ? [id, t.id] : [id]; };
+const withSides = ids => [...new Set([...ids].flatMap(sidesOf))];
+const sameGarment = (a, b) => a.id===b.id || (a.sameAs===b.id) || (b.sameAs===a.id);
+function markPlanned(planned, id, date){ sidesOf(id).forEach(x=>planned[x] = date); }
 function stats(before){
   const m = {};
   closet().forEach(p=>m[p.id]={count:0,last:null});
   log().filter(e=>!before || e.date < before).forEach(e=>(e.items||[]).forEach(id=>{ const x=m[id]; if(!x) return; x.count++; if(!x.last||e.date>x.last) x.last=e.date; }));
+  closet().forEach(p=>{ const t = twinOf(p), a = m[p.id], b = t && m[t.id]; if(!b || p.id > t.id) return;
+    const last = [a.last, b.last].filter(Boolean).sort().pop() || null, count = a.count + b.count; a.last = b.last = last; a.count = b.count = count; });
   return m;
 }
 function ensureSample(){
@@ -227,7 +236,7 @@ const statusOf = p => STATUS[p.status] ? p.status : 'available';
 const usable = (p, away) => !p.dontWear && (statusOf(p)==='available' || (away && statusOf(p)==='trip'));
 const slotOf = p => p.cat==='accessory' ? (p.shape==='belt' ? 'belt' : p.shape==='strap' ? 'strap' : 'accessory') : p.cat;
 function onRepeatSince(id, date){
-  const d = S.state.onRepeat[id]; if(!d) return null;
+  const d = sidesOf(id).map(x=>S.state.onRepeat[x]).filter(Boolean).sort().pop(); if(!d) return null;
   const n = daysBetween(d, date || TODAY);
   return n>=0 && n<ON_REPEAT_DAYS ? d : null;
 }
@@ -785,7 +794,7 @@ function applySwaps(res, date){
   res.list = SLOT_ORDER.filter(k=>res.slots[k]).map(k=>({slot:k, p:res.slots[k]}));
   return res;
 }
-function tripScope(date){ const t = activeTrip(date); return t && t.packed && t.packed.length ? new Set(t.packed) : null; }
+function tripScope(date){ const t = activeTrip(date); return t && t.packed && t.packed.length ? new Set(withSides(t.packed)) : null; }
 // At home, the next two weeks are planned in order, so a piece used on one day is rested on the next.
 function homeLooks(){
   const key = 'home|'+TODAY;
@@ -795,12 +804,12 @@ function homeLooks(){
   for(let i=0; i<14; i++){
     const date = addDays(TODAY, i);
     const logged = log().find(e=>e.date===date && e.source!=='sample' && e.items && e.items.length);
-    if(logged){ logged.items.forEach(id=>planned[id] = date); continue; }
+    if(logged){ logged.items.forEach(id=>markPlanned(planned, id, date)); continue; }
     if(activeTrip(date)) continue;
     const pd = planDay(date);
-    if(pd && pd.outfit && pd.outfit.length){ pd.outfit.forEach(id=>planned[id] = date); continue; }
+    if(pd && pd.outfit && pd.outfit.length){ pd.outfit.forEach(id=>markPlanned(planned, id, date)); continue; }
     const res = applySwaps(buildOutfit(date, {planned}), date);
-    res.list.forEach(({p})=>planned[p.id] = date);
+    res.list.forEach(({p})=>markPlanned(planned, p.id, date));
     looks[date] = res;
   }
   return looks;
@@ -928,12 +937,12 @@ function tripContext(t){
 }
 // One look per trip day from the suitcase, in date order, so each piece is rested between wears. Rewears are on purpose.
 function planLooks(t, ids){
-  const scope = new Set(ids), planned = {}, looks = {}, uses = {};
+  const scope = new Set(withSides(ids)), planned = {}, looks = {}, uses = {};
   tripDays(t).forEach(date=>{
     const logged = log().find(e=>e.date===date && e.source!=='sample' && e.items && e.items.length);
-    if(logged){ logged.items.forEach(id=>planned[id] = date); return; }
+    if(logged){ logged.items.forEach(id=>markPlanned(planned, id, date)); return; }
     const res = applySwaps(buildOutfit(date, {scope, planned, uses}), date);
-    res.list.forEach(({p})=>{ planned[p.id] = date; uses[p.id] = (uses[p.id]||0)+1; });
+    res.list.forEach(({p})=>{ markPlanned(planned, p.id, date); sidesOf(p.id).forEach(x=>{ uses[x] = (uses[x]||0)+1; }); });
     looks[date] = res;
   });
   return looks;
@@ -944,7 +953,7 @@ function tripLooks(t){
 }
 function usageCount(looks){
   const use = {};
-  Object.values(looks).forEach(r=>r.list.forEach(({p})=>use[p.id] = (use[p.id]||0)+1));
+  Object.values(looks).forEach(r=>r.list.forEach(({p})=>sidesOf(p.id).forEach(x=>{ use[x] = (use[x]||0)+1; })));
   return use;
 }
 function packTrip(t){
@@ -966,6 +975,7 @@ function packTrip(t){
     let s = 3 - (tg!=null ? Math.abs(warmthOf(p) - tg) * 1.1 : 0);
     s -= Math.max(0, d.formal - (p.formality||2)) * (slot==='shoes' ? .5 : 1.4);
     if(d.c.occ==='off') s -= Math.max(0,(p.formality||2)-2)*.6;
+    if(!pieceAllowed(p, {date:d.c.date, high:d.c.w && d.c.w.max!=null ? d.c.w.max : null})) s -= 5; // a check (sandals only when hot) rules this piece out for that day
     if(slot==='shoes' && d.c.rain && /suede/i.test(p.composition||p.name||'')) s -= 2.5;
     if(slot==='shoes' && acts.has('sightseeing') && p.shape==='trainer') s += .8;
     return s;
@@ -981,10 +991,11 @@ function packTrip(t){
     while(out.length < target){
       let top = null, topV = -1e9;
       list.forEach(p=>{
-        if(out.includes(p)) return;
+        if(out.includes(p) || out.some(q=>sameGarment(q,p))) return;
         let gain = 0; dl.forEach((d,i)=>{ gain += Math.max(0, dayScore(p,slot,d) - best[i]); });
         let v = gain/dl.length + base(p,slot);
         if(out.some(q=>q.shape===p.shape && q.colour===p.colour)) v -= 1.2;
+        if(slot==='shoes' && bottomsIn.length){ const bad = bottomsIn.filter(b=>pairBreaks(b,p)).length; v -= 4*bad/bottomsIn.length; } // never the only shoes for days of trousers it can't be worn with
         if(extra) v += extra(p, out);
         if(v > topV){ top = p; topV = v; }
       });
@@ -995,7 +1006,9 @@ function packTrip(t){
   }
   const nDress = days.some(d=>d.need<=3) ? clamp(Math.round(D/4), 0, 3) : 0;
   const sep = Math.max(1, D - nDress);
+  let bottomsIn = [];
   const bottoms = choose('bottom', clamp(Math.floor(sep/2), 1, 4), null, p=>NEUTRAL.test(p.colour||'') && !patterned(p) ? 1 : 0);
+  bottomsIn = bottoms;
   const tops = choose('top', clamp(Math.ceil(sep/2), 1, 6), null, p=>bottoms.length ? (bottoms.filter(b=>compatible(p,b)).length/bottoms.length)*2 - 1.2 : 0);
   const dresses = nDress ? choose('dress', nDress) : [];
   const minT = known.length ? Math.min(...known.map(c=>c.tmin!=null ? c.tmin : c.t)) : null;
@@ -1046,7 +1059,7 @@ function tripReasons(t){
   const outers = packed.filter(p=>p.cat==='outer');
   const layer = minT!=null && band(minT)>=2 && outers.length ? outers.slice().sort((a,b)=>warmthOf(b)-warmthOf(a))[0] : null;
   const out = {};
-  const vl = validLooks(tripPackedIds(t), ctx);
+  const vl = validLooks(withSides(tripPackedIds(t)), ctx);
   packed.forEach(p=>{
     const k = use[p.id]||0, c = vl.use[p.id]||0, bits = [];
     if((t.mine||[]).includes(p.id)) bits.push('You are taking this');
@@ -1063,7 +1076,7 @@ function tripReasons(t){
   return out;
 }
 function tripGaps(t){
-  const ctx = tripContext(t), D = ctx.length, ids = tripPackedIds(t), packed = ids.map(piece).filter(Boolean);
+  const ctx = tripContext(t), D = ctx.length, ids = withSides(tripPackedIds(t)), packed = ids.map(piece).filter(Boolean);
   const acts = new Set(t.activities||[]), gaps = [], notes = [];
   if(!D) return {gaps, notes};
   const when = ds => ds.length===1 ? nice(ds[0]) : ds.length<=3 ? ds.map(d=>`${dayShort(d)} ${parse(d).getDate()}`).join(', ') : `${ds.length} days`;
@@ -1407,6 +1420,8 @@ const LAYOUT = {
 const LAYOUT_NO_OUTER = {top:{x:20,y:30,w:44,z:3}, under:{x:4,y:52,w:26,z:2}, dress:{x:24,y:27,w:38,z:3}, bottom:{x:50,y:46,w:32,z:2}, shoes:{x:10,y:85,w:28,z:4}, accessory:{x:68,y:28,w:11,z:5},
   belt:{x:66,y:46,w:15,z:4}, bag:{x:68,y:64,w:24,z:4}, strap:{x:70,y:84,w:20,z:5}};
 const REPEAT_ICON = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="square" aria-hidden="true"><path d="M3.5 8.5V7a2.5 2.5 0 0 1 2.5-2.5h10"/><path d="M13.5 2.2 16.2 4.5 13.5 6.8"/><path d="M16.5 11.5V13a2.5 2.5 0 0 1-2.5 2.5H4"/><path d="M6.5 13.2 3.8 15.5 6.5 17.8"/></svg>';
+// The other side of a reversible garment: a small picture that opens that side.
+function sideBtn(p){ const t = twinOf(p); return t ? `<button type="button" class="side" data-piece="${esc(t.id)}" aria-label="Other side: ${esc(t.name)}">${art(t)}</button>` : ''; }
 function repeatBtn(id){
   const on = !!onRepeatSince(id);
   return `<button type="button" class="rep" data-repeat="${esc(id)}" aria-pressed="${on}" aria-label="${on?'On repeat. Tap to clear.':'Mark as on repeat'}">${REPEAT_ICON}</button>`;
@@ -1496,13 +1511,13 @@ function weekInspo(startDay){
   const open = days.filter(d=>d>=TODAY && !isInOffice(d) && !activeTrip(d));
   const out = []; S.ui.memo[key] = out;
   if(!need || !open.length) return out;
-  const planned = {}; weekOf(startDay).forEach(d=>{ outfitFor(d).list.forEach(({p})=>planned[p.id] = d); });
+  const planned = {}; weekOf(startDay).forEach(d=>{ outfitFor(d).list.forEach(({p})=>markPlanned(planned, p.id, d)); });
   const k = Math.min(need, open.length);
   for(let i=0; i<k; i++){
     const d = open[Math.min(open.length-1, Math.floor((i+.5)*open.length/k))];
     const res = applySwaps(buildOutfit(d, {occ:'office', planned, scope:null}), '(inspiration)'); // no swaps apply, it only builds the list
     if(!res.list.length) continue;
-    res.list.forEach(({p})=>planned[p.id] = d);
+    res.list.forEach(({p})=>markPlanned(planned, p.id, d));
     out.push(Object.assign({}, res, {forDay:d}));
   }
   return out;
@@ -1629,7 +1644,7 @@ function closetBody(){
   const item = p => { const s = st[p.id], rep = onRepeatSince(p.id), sx = statusOf(p);
     const fresh = hasHistory() && live(p) && sx==='available' && !rep && (!s.last || daysBetween(s.last, TODAY)>=60);
     const line = p.dontWear ? 'Set aside' : sx!=='available' ? STATUS[sx] : rep ? `On repeat since ${shortDate(rep)}` : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : '';
-    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span>${line?`<span class="st${fresh?' fresh':''}">${esc(line)}</span>`:''}</button>${loveBtn(p.id)}${repeatBtn(p.id)}</div>`; };
+    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span>${line?`<span class="st${fresh?' fresh':''}">${esc(line)}</span>`:''}</button>${loveBtn(p.id)}${repeatBtn(p.id)}${sideBtn(p)}</div>`; };
   const list = closetList(filter);
   if(filter==='doubles'){
     const ids = new Set(list.map(p=>p.id)), dbl = doubles().filter(g=>g.some(p=>ids.has(p.id)));
@@ -2247,6 +2262,7 @@ function sheetPiece(id, tab){
       <dt>Fabric</dt><dd>${esc([f.name, f.note].filter(Boolean).join('. '))}</dd>
       <dt>Warmth</dt><dd>${warmW}${rules().warm[id]?' (adjusted by your reports)':''}</dd>
     </dl>
+    ${twinOf(p) ? `<div class="field" style="margin-top:16px"><span class="cap">Reversible</span><button type="button" class="otherside" data-piece="${esc(twinOf(p).id)}"><span class="th">${art(twinOf(p))}</span><span>Other side: ${esc(twinOf(p).name)}<small>One garment. Wearing either side counts for both.</small></span></button></div>` : ''}
     <div class="acts" style="padding-bottom:0"><button type="button" class="btn" data-act="lookswith" data-id="${esc(id)}">Outfits with this</button></div>
     <div class="stack">
       <div class="field"><span class="cap">Status</span></div>
@@ -2596,7 +2612,7 @@ function removeWornPhoto(date){
 /* ---------------- actions ---------------- */
 function toggleRepeat(id){
   const on = !!onRepeatSince(id);
-  S.state.onRepeat[id] = on ? null : TODAY;
+  sidesOf(id).forEach(x=>{ S.state.onRepeat[x] = on ? null : TODAY; });
   queuePush({state:true}); render();
   toast(on ? 'Back in the mix' : `On repeat since ${shortDate(TODAY)}`);
 }

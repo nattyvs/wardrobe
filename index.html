@@ -436,6 +436,11 @@ p.pad{margin:0 0 12px}
 .field input[type=date]{-webkit-appearance:none;appearance:none;min-height:40px;font-family:var(--jost)}
 /* style: loves, looks, inspiration */
 .tile .love{position:absolute;top:0;left:0}
+.tile .side{position:absolute;top:38px;right:4px;width:30px;height:30px;padding:2px;border:1px solid var(--rule-soft);background:var(--paper);display:grid;place-items:center}
+.tile .side img,.tile .side svg{width:100%;height:100%;object-fit:contain}
+.otherside{display:flex;gap:12px;align-items:center;width:100%;text-align:left;background:none;border:1px solid var(--rule-soft);padding:8px;color:var(--ink);font:inherit}
+.otherside .th{width:48px;height:48px;flex:none;display:grid;place-items:center}.otherside .th img,.otherside .th svg{width:100%;height:100%;object-fit:contain}
+.otherside small{display:block;color:var(--ink-2);font-size:12px}
 h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
 .looks,.inspo,.learned{list-style:none;margin:0;padding:0 var(--gutter-r) 0 var(--gutter)}
 .looks li{display:grid;grid-template-columns:56px minmax(0,1fr);gap:4px 14px;padding:14px 0;border-bottom:1px solid var(--rule-soft);align-items:start}
