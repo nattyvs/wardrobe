@@ -573,6 +573,23 @@ h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
 .own{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px}
 .own img{width:72px;height:92px;object-fit:cover;display:block}
 .busy{color:var(--ink)}
+/* Long lists. Fold: a section that opens on tap. Reveal: the first few, then "Show N more". See DESIGN.md "Long lists". */
+.fold > summary{list-style:none;display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 14px;min-height:44px;padding:0 var(--gutter-r) 0 var(--gutter);cursor:pointer}
+.fold > summary::-webkit-details-marker{display:none}
+.fold > summary .cap .n{font:400 13px/1 var(--didot);letter-spacing:0;margin-left:8px;color:var(--ink-2)}
+.fold > summary .fold-sum{grid-column:1;margin:0}
+.fold > summary .fold-act{grid-column:2;grid-row:1 / span 2;font:500 10.5px/1 var(--jost);letter-spacing:.22em;text-transform:uppercase;text-decoration:underline;text-underline-offset:4px}
+.fold > summary .fold-act::after{content:"Show"}
+.fold[open] > summary .fold-act::after{content:"Hide"}
+.fold[open] > summary{padding-bottom:12px}
+.fold > summary:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+.panel.fold:not([open]){padding-block:14px}
+.fold:not(.panel){margin-top:18px;border-top:1px solid var(--rule-soft)}
+.reveal{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px var(--gutter-r) 0 var(--gutter);border-top:1px solid var(--rule-soft)}
+.reveal .linkish{min-height:44px;display:inline-flex;align-items:center}
+.group .reveal{margin-inline:0}
+.history li.mo{display:block;padding:16px 0 6px;border-bottom:1px solid var(--rule)}
+.fl-row{padding-top:12px}
 </style>
 </head>
 <body>

@@ -26,7 +26,7 @@ const S = {
   sha: cache.sha || {},
   synced: cache.synced || null,
   photos: {},
-  ui: {memo:{}, rules:null}
+  ui: {memo:{}, rules:null, more:{}, chips:{}}
 };
 function persist(){ S.ui.memo = {}; S.ui.rules = null; LS.set('wd.cache', {closet:S.closet, log:S.log, plan:S.plan, state:S.state, trips:S.trips, palette:S.palette, style:S.style, vision:S.vision, sha:S.sha, synced:S.synced}); }
 function saveSettings(){ LS.set('wd.settings', settings); }
@@ -1313,6 +1313,29 @@ function render(opts){
 }
 
 /* ---------------- views ---------------- */
+/* ---------------- long lists: fold, reveal, filterRow (see DESIGN.md "Long lists") ---------------- */
+const FOLD = LS.get('wd.fold', {});
+const foldOpen = (key, dflt) => key in FOLD ? !!FOLD[key] : !!dflt;
+// o = {title, count, summary, open (default state), cls, body}
+function fold(key, o){
+  return `<details class="fold${o.cls?' '+o.cls:''}" data-fold="${esc(key)}" data-n="${o.count==null?'':o.count}"${foldOpen(key, o.open)?' open':''}><summary><span class="cap">${esc(o.title)}${o.count!=null?`<span class="n">${o.count}</span>`:''}</span>${o.summary?`<span class="caption fold-sum">${esc(o.summary)}</span>`:''}<span class="fold-act" aria-hidden="true"></span></summary><div class="fold-body">${o.body}</div></details>`;
+}
+// Shows `page` items, then "Show N more". Slices at render time, so hidden cards are never built and their photos never load.
+// row receives (item, index, shownSlice).
+function reveal(key, items, page, row){
+  const want = S.ui.more[key] || page, n = Math.min(items.length, Math.max(page, want)), left = items.length - n;
+  const shown = items.slice(0, n);
+  const html = shown.map((x,i)=>row(x, i, shown)).join('');
+  const btn = items.length <= page ? '' : `<div class="reveal"><span class="caption">${n} of ${items.length}</span>${left>0
+    ? `<button type="button" class="linkish" data-reveal="${esc(key)}" data-step="${page}">Show ${Math.min(page, left)} more</button>`
+    : `<button type="button" class="linkish" data-reveal="${esc(key)}" data-step="${page}" data-reset="1">Show fewer</button>`}</div>`;
+  return {html, btn};
+}
+// opts = [[value, label, count]]. Options with 0 are hidden. If the chosen one empties, falls back to the default.
+function filterRow(key, opts, dflt){
+  let cur = S.ui.chips[key] || dflt; if(!opts.some(o=>o[0]===cur && (o[2] || o[0]===dflt))) cur = dflt;
+  return {cur, html:`<div class="filters fl-row" role="group" aria-label="Filter">${opts.filter(o=>o[2] || o[0]===dflt).map(([v,l,n])=>`<button type="button" class="label" data-chip="${esc(key)}" data-v="${esc(v)}" aria-pressed="${v===cur}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</div>`};
+}
 function masthead(back){
   return `<header class="mast">${back ? `<a class="back" href="${back.href}" aria-label="Back to ${esc(back.label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span class="label">${esc(back.label)}</span></a>` : '<span class="word">Wardrobe</span>'}<button type="button" data-act="city" aria-label="Switch city, now ${esc(settings.city)}"><span class="label">${esc(settings.city)}</span></button></header>
   ${settings.sample || (S.weather&&S.weather.sample) ? `<p class="sample-note">${settings.sample?'Sample wardrobe':'Your wardrobe'}${S.weather&&S.weather.sample?' and sample forecast':''}.${settings.sample?` <a href="#log/settings">Connect yours</a>`:''}</p>` : ''}`;
@@ -1388,7 +1411,7 @@ function viewDay(date, settle){
   <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">${worthTrying(o, date) ? 'Worth trying on in ChatGPT' : 'Try it on in ChatGPT'}</button></div>`:''}</section>
   <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>
   ${(()=>{ const sc = o.score || (o.list.length ? lookScore(o.slots, date, {}) : null); if(!sc) return ''; const w = weights();
-    return `<section class="panel"><span class="cap">How it scores</span><p class="caption pad">Six things a stylist weighs. The weights shift as you rate looks.</p><ul class="scores">${FACTORS.map(([k,l])=>`<li><span class="t">${l}<small>${Math.round(w[k]*100)}% of the score</small></span><span class="bar" aria-label="${Math.round(sc.f[k]*100)} out of 100"><i style="width:${Math.round(sc.f[k]*100)}%"></i></span>${sc.note[k]?`<span class="s">${esc(sc.note[k])}</span>`:''}</li>`).join('')}</ul></section>`; })()}`;
+    return fold('today.scores', {cls:'panel', title:'How it scores', open:false, body:`<p class="caption pad">Six things a stylist weighs. The weights shift as you rate looks.</p><ul class="scores">${FACTORS.map(([k,l])=>`<li><span class="t">${l}<small>${Math.round(w[k]*100)}% of the score</small></span><span class="bar" aria-label="${Math.round(sc.f[k]*100)} out of 100"><i style="width:${Math.round(sc.f[k]*100)}%"></i></span>${sc.note[k]?`<span class="s">${esc(sc.note[k])}</span>`:''}</li>`).join('')}</ul>`}); })()}`;
 }
 
 function dayRowHTML(d, place){
@@ -1632,7 +1655,7 @@ function viewMore(){
   return `${masthead()}
   <header class="pagehead withlink"><h1 class="page">Get more from it</h1><a class="toplink" href="#closet"><span class="label">Closet</span></a><p class="lede">Pieces that struggle to make a look, what would really help before you buy, and what has been sitting still.</p></header>
   <section class="panel"><span class="cap">Hardest to wear <span class="n">${os.length}</span></span><p class="caption pad">Tops and bottoms that pair with less than half of what a typical one does, by the same rules the daily looks use. Find them a partner, style them differently, or let them go.</p>
-    ${os.length ? `<ul class="more-list">${os.map(orphanRow).join('')}</ul>` : '<p class="caption pad">None. Everything pairs with a fair share of your closet.</p>'}</section>
+    ${os.length ? (()=>{ const x = reveal('more.orphans', os, 5, orphanRow); return `<ul class="more-list">${x.html}</ul>${x.btn}`; })() : '<p class="caption pad">None. Everything pairs with a fair share of your closet.</p>'}</section>
   <section class="panel"><span class="cap">Before you buy</span><p class="caption pad">Describe the piece. The app counts how many pieces it would pair with, which hard-to-wear pieces it would help, and how many like it you already own.</p>
     <div class="field"><span class="cap">What is it?</span></div>${tagChips(BUY_CATS, [d.cat], 'data-buycat')}
     <div class="field"><span class="cap">Colour</span></div><div class="swatches" role="group" aria-label="Colour">${COLOUR_CHIPS.map(([c,h])=>`<button type="button" class="sw" data-buycol="${c}" aria-pressed="${d.colour===c}" aria-label="${c}" style="background:${h}"></button>`).join('')}</div>
@@ -1641,7 +1664,7 @@ function viewMore(){
     <p class="caption pad">A rough count from colour, print, proportion and occasion. It can't see fabric or cut, so treat it as a second opinion.</p></section>
   <section class="panel"><span class="cap">Not worn in six months <span class="n">${dl.length}</span></span>
     <p class="caption pad">${left>0 ? `The app has only been watching since ${esc(nice(since))}, so it can't tell yet. It will add its own list in ${left} days. Until then, mark what you know you haven't worn.` : 'Pieces not worn in six months, plus any you have marked.'}</p>
-    ${dl.length ? `<ul class="more-list">${dl.map(dormRow).join('')}</ul>` : ''}
+    ${dl.length ? (()=>{ const x = reveal('more.dormant', dl, 5, dormRow); return `<ul class="more-list">${x.html}</ul>${x.btn}`; })() : ''}
     <div class="acts"><button type="button" class="btn ghost" data-act="markdormant">Mark what I haven't worn</button></div></section>`;
 }
 function sheetDormant(){
@@ -1668,7 +1691,10 @@ function viewLog(arg){
   const row = p => `<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(sinceWords(stats()[p.id].last))}</span></span><input type="checkbox" class="check" data-pick="${esc(p.id)}" ${sel.has(p.id)?'checked':''} aria-label="${esc(p.name)}"></label></li>`;
   const cats = [['top','Tops'],['bottom','Bottoms'],['dress','Dresses'],['outer','Outer'],['shoes','Shoes'],['accessory','Extras'],['bag','Bags']];
   const feel = entry && entry.feel;
-  const hist = log().filter(e=>e.source!=='sample').slice(-14).reverse().map(e=>`<li><span class="dt">${esc(dayShort(e.date))} ${parse(e.date).getDate()}<small>${e.feel?esc(FEEL[e.feel]):'Logged'}</small></span><span class="thumbs">${(e.items||[]).map(piece).filter(Boolean).map(p=>`<span>${art(p)}</span>`).join('')}</span></li>`).join('');
+  const past = log().filter(e=>e.source!=='sample').slice().sort((a,b)=>b.date.localeCompare(a.date));
+  const monthOf = d => parse(d).toLocaleDateString('en-GB',{month:'long', year:'numeric'});
+  const histRow = e => `<li><span class="dt">${esc(dayShort(e.date))} ${parse(e.date).getDate()}<small>${e.feel?esc(FEEL[e.feel]):'Logged'}</small></span><span class="thumbs">${(e.items||[]).map(piece).filter(Boolean).map(p=>`<span>${art(p)}</span>`).join('')}</span></li>`;
+  const hr = reveal('log.history', past, 14, (e,i,a)=>(i===0||monthOf(e.date)!==monthOf(a[i-1].date)?`<li class="mo"><span class="cap">${esc(monthOf(e.date))}</span></li>`:'')+histRow(e));
   const wash = closet().filter(p=>statusOf(p)==='wash').length;
   return `${masthead()}
   <header class="pagehead"><h1 class="page">${date===TODAY?'Tonight':dayName(date)}</h1><p class="lede">What did you wear${date===TODAY?' today':` on ${esc(nice(date))}`}?</p></header>
@@ -1683,7 +1709,7 @@ function viewLog(arg){
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savelog" data-date="${date}">Save the log</button></div>
   </div>
   ${entry?`<section class="panel"><span class="cap">How did it go?</span><p class="caption pad">React to the look or to a single piece. Two of the same reaction become a rule the app follows.</p><div id="reactions">${reactionsHTML(date)}</div></section>`:''}
-  ${hist?`<section class="panel"><span class="cap">Recent days</span><ul class="history">${hist}</ul></section>`:''}
+  ${past.length?`<section class="panel"><span class="cap">Past days</span><ul class="history">${hr.html}</ul>${hr.btn}</section>`:''}
   <section class="panel"><span class="cap">Laundry</span><div class="field"><p class="caption" style="margin:0">${wash?`${wash} piece${wash>1?'s':''} in the wash.`:'Nothing in the wash. Mark pieces from their sheet.'}</p></div><div class="acts"><button type="button" class="btn ghost" data-act="laundry" ${wash?'':'disabled'}>I did my laundry</button></div></section>
   <section class="panel"><span class="cap">Settings</span><div class="field"><a class="linkish" href="#log/settings">Wardrobe data and sync</a></div></section>`;
 }
@@ -1901,40 +1927,52 @@ function viewStyle(arg){
   if(arg==='look') return viewLookForm();
   if(arg==='inspo') return viewInspoForm();
   const loves = closet().filter(p=>loved(p.id));
-  const looks = liveLooks(), ins = liveInspo(), tryons = liveTryons(), rulesL = (S.style.rules || []).map(r=>typeof r==='string' ? r : r.text);
+  const newest = (a,b)=>(b.added||0)-(a.added||0);
+  const looks = liveLooks().slice().sort(newest), ins = liveInspo().slice().sort(newest), tryons = liveTryons(), rulesL = (S.style.rules || []).map(r=>typeof r==='string' ? r : r.text);
   const live = new Set(checksList().map(c=>(c.rule||'').trim())); // sentences the engine enforces
   const pane = STYLE_PANES.some(x=>x[0]===S.ui.stylePane) ? S.ui.stylePane : 'pieces';
   const whyOf = p => labelsOf(LOVE_WHY, (loved(p.id)||{}).why).join(' · ');
   const lede = loves.length>=3 ? 'What you love, what you wore, what caught your eye.' : 'Show the app what you love, so the looks start to sound like you. Claude reads everything here and writes your rules.';
   // Rules first: the most useful thing on the page.
-  const shownRules = S.ui.rulesAll ? rulesL : rulesL.slice(0,3);
-  const rulesCard = `<section class="panel rulescard"><span class="cap">What Claude has learned</span>
-    ${rulesL.length ? `<ul class="learned">${shownRules.map(r=>`<li>${esc(r)}${live.has((r||'').trim()) ? ' <span class="tag off" title="The looks are built to obey this one">Applied</span>' : ''}</li>`).join('')}</ul>${rulesL.length>3 ? `<div class="acts"><button type="button" class="linkish" data-act="rulesall">${S.ui.rulesAll ? 'Show fewer' : `See all ${rulesL.length}`}</button></div>` : ''}`
-      : `<p class="caption pad">Nothing yet. Once you have added a few loves, looks and pictures, Claude can read them.</p><div class="acts"><button type="button" class="btn ghost" data-act="readstyle">Read my style</button></div>`}</section>`;
+  const appliedN = rulesL.filter(r=>live.has((r||'').trim())).length;
+  if(rulesL.length && LS.get('wd.rulesSeen', null)==null) LS.set('wd.rulesSeen', rulesL.length);
+  const fresh = Math.max(0, rulesL.length - LS.get('wd.rulesSeen', rulesL.length));
+  const ruleRow = r => `<li>${esc(r)}${live.has((r||'').trim()) ? ' <span class="tag off" title="The looks are built to obey this one">Applied</span>' : ''}</li>`;
+  const rr = reveal('style.rules', rulesL, 8, ruleRow);
+  const rulesCard = rulesL.length
+    ? fold('style.rules', {cls:'panel rulescard', title:'What Claude has learned', count:rulesL.length, open:false,
+        summary:`${appliedN ? `${appliedN} applied to the looks` : 'Not applied to the looks yet'}${fresh ? ` \u00b7 ${fresh} new` : ''}`,
+        body:`<ul class="learned">${rr.html}</ul>${rr.btn}`})
+    : `<section class="panel rulescard"><span class="cap">What Claude has learned</span><p class="caption pad">Nothing yet. Once you have added a few loves, looks and pictures, Claude can read them.</p><div class="acts"><button type="button" class="btn ghost" data-act="readstyle">Read my style</button></div></section>`;
   const counts = {pieces:loves.length, looks:looks.length, tryons:tryons.length, inspo:ins.length};
   const seg = `<nav class="stylepanes segs" role="tablist" aria-label="Style">${STYLE_PANES.map(([k,l])=>`<button type="button" class="label" role="tab" data-stylepane="${k}" aria-pressed="${k===pane}">${l}${counts[k]?`<span class="n">${counts[k]}</span>`:''}</button>`).join('')}</nav>`;
   const head = (n, noun, href) => `<div class="panehead"><span class="caption">${n ? `${n} ${noun}` : ''}</span><a class="linkish" href="${href}">+ Add</a></div>`;
   let body = '';
   if(pane==='pieces'){
     body = head(loves.length, loves.length===1 ? 'piece you love' : 'pieces you love', '#closet') + (loves.length
-      ? `<section class="group"><div class="grid four">${loves.map(p=>`<div class="tile"><button type="button" class="item" data-piece="${esc(p.id)}" aria-label="${esc(p.name)}${whyOf(p)?`, ${esc(whyOf(p))}`:''}"><span class="img">${art(p)}</span></button>${loveBtn(p.id)}</div>`).join('')}</div></section>`
+      ? (()=>{ const r = reveal('style.pieces', loves, 12, p=>`<div class="tile"><button type="button" class="item" data-piece="${esc(p.id)}" aria-label="${esc(p.name)}${whyOf(p)?`, ${esc(whyOf(p))}`:''}"><span class="img">${art(p)}</span></button>${loveBtn(p.id)}</div>`); return `<section class="group"><div class="grid four">${r.html}</div></section>${r.btn}`; })()
       : `<p class="empty">Nothing yet. Tap the heart on a piece in the Closet, or open it and say why you love it.</p>`);
   } else if(pane==='looks'){
     const card = l => { const ps = (l.items||[]).map(piece).filter(Boolean);
-      return `<li><span class="ph${l.preview?'':' flat'}">${l.preview ? `<img src="${l.preview}" alt="">` : ps.slice(0,4).map(p=>`<span>${art(p)}</span>`).join('')}</span>${pstrip(ps)}<span class="sub">${esc([OCC[l.occ]||'', ...labelsOf(LOOK_TAGS, l.tags)].filter(Boolean).join(' · '))}</span>${l.note?`<span class="note">${esc(l.note)}</span>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="looks" data-id="${esc(l.id)}">Remove</button></li>`; };
+      return `<li><span class="ph${l.preview?'':' flat'}">${l.preview ? `<img src="${l.preview}" alt="" loading="lazy" decoding="async">` : ps.slice(0,4).map(p=>`<span>${art(p)}</span>`).join('')}</span>${pstrip(ps)}<span class="sub">${esc([OCC[l.occ]||'', ...labelsOf(LOOK_TAGS, l.tags)].filter(Boolean).join(' · '))}</span>${l.note?`<span class="note">${esc(l.note)}</span>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="looks" data-id="${esc(l.id)}">Remove</button></li>`; };
     body = head(looks.length, looks.length===1 ? 'look you loved' : 'looks you loved', '#style/look') + (looks.length
-      ? `<ul class="sgrid">${looks.map(card).join('')}</ul>`
+      ? (()=>{ const r = reveal('style.looks', looks, 6, card); return `<ul class="sgrid">${r.html}</ul>${r.btn}`; })()
       : `<p class="empty">An outfit you wore and liked. A photo helps, but the pieces are enough.</p>`);
   } else if(pane==='tryons'){
+    const vOf = tr => tr.verdict==='y' ? 'y' : tr.verdict==='m' ? 'm' : 'n'; // verdicts are stored as y, m or n; nothing is unrated
     const card = tr => { const real = realFor(tr.items), src = real ? picOf(real) : picOf(tr), ps = (tr.items||[]).map(piece).filter(Boolean), offer = tryonWorn(tr);
-      return `<li><span class="ph"><img src="${src}" alt=""><span class="badge">${real?'Worn':'Render'}</span></span>${pstrip(ps)}<span class="sub">${esc(verdictWords(tr))}${real?` · worn ${esc(nice(real.date))}`:''}</span>${deciders(tr)}${offer?`<button type="button" class="linkish" data-act="tryon2look" data-id="${esc(tr.id)}">Add to Looks I loved</button>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="tryons" data-id="${esc(tr.id)}">Remove</button></li>`; };
+      return `<li><span class="ph"><img src="${src}" alt="" loading="lazy" decoding="async"><span class="badge">${real?'Worn':'Render'}</span></span>${pstrip(ps)}<span class="sub">${esc(verdictWords(tr))}${real?` · worn ${esc(nice(real.date))}`:''}</span>${deciders(tr)}${offer?`<button type="button" class="linkish" data-act="tryon2look" data-id="${esc(tr.id)}">Add to Looks I loved</button>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="tryons" data-id="${esc(tr.id)}">Remove</button></li>`; };
     body = `<div class="panehead"><span class="caption">${tryons.length ? `${tryons.length} ChatGPT render${tryons.length===1?'':'s'}` : ''}</span></div>` + (tryons.length
-      ? `<ul class="sgrid tryons">${tryons.map(card).join('')}</ul>`
+      ? (()=>{ const cnt = v => tryons.filter(t=>vOf(t)===v).length;
+          const fr = filterRow('style.tryons', [['all','All',tryons.length],['y','Loved',cnt('y')],['m','Not sure',cnt('m')],['n','Not for me',cnt('n')]], 'all');
+          const shown = fr.cur==='all' ? tryons : tryons.filter(t=>vOf(t)===fr.cur);
+          const r = reveal('style.tryons.'+fr.cur, shown, 6, card);
+          return `${tryons.length>6 ? fr.html : ''}<ul class="sgrid tryons">${r.html}</ul>${r.btn}`; })()
       : `<p class="empty">ChatGPT renders you saved, with your verdict. Open a day, tap Try it on in ChatGPT, then add the picture you get back.</p>`);
   } else {
-    const card = x => `<li><button type="button" class="ph" data-inspoopen="${esc(x.id)}" aria-label="Open this picture">${x.preview?`<img src="${x.preview}" alt="">`:`<span class="in-link">Link</span>`}</button></li>`;
+    const card = x => `<li><button type="button" class="ph" data-inspoopen="${esc(x.id)}" aria-label="Open this picture">${x.preview?`<img src="${x.preview}" alt="" loading="lazy" decoding="async">`:`<span class="in-link">Link</span>`}</button></li>`;
     body = head(ins.length, ins.length===1 ? 'picture' : 'pictures', '#style/inspo') + (ins.length
-      ? `<ul class="sgrid">${ins.map(card).join('')}</ul>`
+      ? (()=>{ const r = reveal('style.inspo', ins, 8, card); return `<ul class="sgrid">${r.html}</ul>${r.btn}`; })()
       : `<p class="empty">Screenshots and links from anywhere. Say what caught your eye.</p>`);
   }
   return `${masthead()}
@@ -2039,10 +2077,12 @@ function newDraft(t){
 function viewTrips(){
   const ts = liveTrips().slice().sort((a,b)=>((tripSpan(b)||{}).from||'').localeCompare((tripSpan(a)||{}).from||''));
   const row = t => { const n = (t.packed||[]).length; return `<li><a href="#trip/${esc(t.id)}"><span class="dn">${tripSpan(t)?parse(tripSpan(t).from).getDate():''}</span><span class="meta"><span class="t d">${esc(tripName(t))}</span><span class="names">${esc(tripDates(t))}${n?` · ${n} pieces packed`:' · nothing packed yet'}</span></span></a></li>`; };
+  const upcoming = ts.filter(t=>{ const sp = tripSpan(t); return !sp || sp.to>=TODAY; }), pastTrips = ts.filter(t=>!upcoming.includes(t));
   return `${masthead()}
   <header class="pagehead"><h1 class="page">Trips</h1><p class="lede">${ts.length?'Pack from what you own.':'No trips yet. Add one and the app packs from your closet.'}</p></header>
   <hr class="rule">
-  ${ts.length?`<ul class="days trips">${ts.map(row).join('')}</ul>`:''}
+  ${upcoming.length?`<ul class="days trips">${upcoming.map(row).join('')}</ul>`:''}
+  ${pastTrips.length?fold('trips.past', {title:'Past trips', count:pastTrips.length, open:false, body:`<ul class="days trips">${pastTrips.map(row).join('')}</ul>`}):''}
   <div class="acts"><a class="btn" href="#trip/new">Plan a trip</a><a class="btn ghost" href="#week">Back</a></div>`;
 }
 function viewTripForm(d){
@@ -2593,6 +2633,12 @@ document.addEventListener('click', async e=>{
   if(t.dataset.tripjump){ tripJumpTo(t.dataset.tripjump); return; }
   if(t.dataset.packonly){ S.ui.packOnly = !S.ui.packOnly; $('#sheet').classList.toggle('packonly', S.ui.packOnly); t.setAttribute('aria-pressed', S.ui.packOnly); if(S.ui.packOnly) $('#sheet').scrollTo({top:0}); return; }
   if(t.dataset.stylepane){ S.ui.stylePane = t.dataset.stylepane; render(); return; }
+  if(t.dataset.reveal){ const k = t.dataset.reveal, step = +t.dataset.step;
+    S.ui.more[k] = t.dataset.reset ? 0 : Math.max(step, S.ui.more[k]||step) + step; render();
+    const b = document.querySelector(`[data-reveal="${CSS.escape(k)}"]`);
+    if(b){ if(t.dataset.reset) b.scrollIntoView({block:'center'}); else b.focus({preventScroll:true}); }
+    return; }
+  if(t.dataset.chip){ S.ui.chips[t.dataset.chip] = t.dataset.v; render(); return; }
   if(t.dataset.inspoopen){ sheetInspo(t.dataset.inspoopen); return; }
   if(t.dataset.piece){ sheetPiece(t.dataset.piece); return; }
   if(t.dataset.filter){ location.hash = '#closet/'+t.dataset.filter; return; }
@@ -2667,7 +2713,6 @@ document.addEventListener('click', async e=>{
   else if(act==='bagchange'){ sheetBag(t.dataset.date); }
   else if(act==='ownopen'){ sheetOwn(); }
   else if(act==='ownconfirm'){ LS.set('wd.ownok', true); sheetOwn(); }
-  else if(act==='rulesall'){ S.ui.rulesAll = !S.ui.rulesAll; render(); }
   else if(act==='readstyle'){ const ok = await copyText('Read my Style tab (data/style.json in my wardrobe-private repo) and write my style rules into "rules".'); toast(ok ? 'Copied. Paste it to Claude.' : "Couldn't copy that here."); }
   else if(act==='tryon2look'){
     const tr = liveTryons().find(x=>x.id===t.dataset.id), real = tr && tryonWorn(tr); if(!real) return;
@@ -2818,6 +2863,10 @@ document.addEventListener('change', async e=>{
   }
 });
 $('#scrim').addEventListener('click', closeSheet);
+// Folds remember being open or closed. `toggle` does not bubble, so listen in the capture phase.
+document.addEventListener('toggle', e=>{ const d = e.target; if(!d.matches || !d.matches('details[data-fold]')) return;
+  FOLD[d.dataset.fold] = d.open; LS.set('wd.fold', FOLD);
+  if(d.open && d.dataset.fold==='style.rules') LS.set('wd.rulesSeen', +d.dataset.n || 0); }, true);
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); if(e.key==='Enter' && e.target.id==='extrain'){ e.preventDefault(); addExtra(e.target.dataset.trip); } });
 function currentPicks(){ return [...document.querySelectorAll('[data-pick]')].filter(x=>x.checked).map(x=>x.dataset.pick); }
 function restorePicks(){ const keep = S.ui.keepPicks; if(!keep) return; document.querySelectorAll('[data-pick]').forEach(x=>x.checked = keep.includes(x.dataset.pick)); S.ui.keepPicks = null; }

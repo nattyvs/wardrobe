@@ -266,6 +266,9 @@ Top of Week: "Office days" with a This week / Next week switch, then five day ch
 ### Sheet
 Bottom sheet on sand with the piece image on white, charcoal top rule, sticky bar with a section cap title and a text "Close", sliding up over a scrim with the house ease.
 
+### Long lists
+**Long lists.** Anything that grows uses one of three shared patterns, never a bespoke one. *Fold*: a section that opens on tap; the summary row is the section cap, a Didot count, a stone one-line summary and a tracked "Show"/"Hide" text action, no chevron. It remembers open or closed on the phone. A closed sand panel shrinks to its summary row. *Reveal*: the first few items, then a stone "6 of 14" caption and a "Show 6 more" text action on a stone hairline; once all are shown it offers "Show fewer". Page sizes: 6 for tall two-column cards, 8 for images and rules, 12 for the four-column grid, 14 log days, 5 rows in Get more. *Filter row*: the same horizontal text labels as the Closet type bar, with Didot counts, shown only when a list passes one page. Month subheads in the Log are section caps over a charcoal rule. New items are counted in charcoal, never pink. The Closet is the exception: it shows everything, and its type bar and search do the narrowing.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -275,6 +278,7 @@ Bottom sheet on sand with the piece image on white, charcoal top rule, sticky ba
 - **Do** keep every control square (0 radius), including switch thumbs and checkboxes.
 - **Do** number the pieces of a look 01 onward and carry the same numbers across flat-lay, credits and notes.
 - **Do** let the day name run oversized and crop off the page edge on Today.
+- **Do** give any list that can grow a fold, a reveal or a filter row (see Long lists); never let a page grow without end.
 - **Do** use the house ease `cubic-bezier(.16,1,.3,1)` and honour reduced motion.
 
 ### Don't:
