@@ -19,7 +19,7 @@ const S = {
   state: Object.assign({dayOcc:{}, swaps:{}, edits:{}, onRepeat:{}, ruleOff:{}, modes:{}, dormant:{}, wearSoon:{}, since:null}, cache.state || {}),
   trips: cache.trips || [],
   palette: cache.palette || null,
-  style: Object.assign({loves:{}, looks:[], inspo:[], rules:[]}, cache.style || {}),
+  style: Object.assign({loves:{}, looks:[], inspo:[], rules:[], checks:[]}, cache.style || {}),
   vision: Object.assign({entries:[], corrections:{}, feedback:[]}, cache.vision||{}),
   tripwx: LS.get('wd.tripwx', {}),
   weather: LS.get('wd.weather', null),
@@ -346,6 +346,53 @@ function compatible(a,b){
   return an || bn || (a.colour||'')===(b.colour||'');
 }
 
+/* ---------------- style checks: Claude's rules, enforced ----------------
+   style.json holds plain-sentence "rules" and, next to them, structured "checks". Claude writes both and the app
+   never changes either. Each check names its sentence in "rule", so the Style tab can show which sentences are live.
+   A check is a hard filter: the engine never builds a look that breaks one, and it is applied before lookScore.
+   To add a check type, add one entry to CHECK_TYPES:
+     piece(check, p, ctx) -> false when p may not be worn on this day at all
+     pair(check, p, q)    -> true when p and q may not be in the same look
+   A match spec ({shape, cat, id, name, notName}) picks pieces; a list means "any of". name and notName are regex text. */
+function matchPiece(p, m){
+  if(!p || !m || !Object.keys(m).length) return false; // an empty spec matches nothing, so a typo can't ban the whole closet
+  const any = (v, want) => want==null || [].concat(want).includes(v);
+  if(!any(p.shape, m.shape) || !any(p.cat, m.cat) || !any(p.id, m.id)) return false;
+  try{
+    if(m.name && !new RegExp(m.name, 'i').test(p.name||'')) return false;
+    if(m.notName && new RegExp(m.notName, 'i').test(p.name||'')) return false;
+  }catch(e){ return false; }
+  return true;
+}
+// "When" conditions read the day's forecast high (the same `max` the weather line shows). No forecast means the
+// condition can't be shown to hold, so the piece stays out rather than risk breaking the rule.
+function whenHolds(when, ctx){
+  if(!when) return true;
+  if(when.tempMin!=null && !(ctx.high!=null && ctx.high >= when.tempMin)) return false;
+  if(when.tempMax!=null && !(ctx.high!=null && ctx.high <= when.tempMax)) return false;
+  return true;
+}
+const CHECK_TYPES = {
+  'never-with': {pair: (c, p, q) => (matchPiece(p, c.a) && matchPiece(q, c.b)) || (matchPiece(q, c.a) && matchPiece(p, c.b))},
+  'only-when':  {piece: (c, p, ctx) => !matchPiece(p, c.a) || whenHolds(c.when, ctx)}
+};
+const checksList = () => ((S.style && S.style.checks) || []).filter(c=>c && CHECK_TYPES[c.type]);
+function checkCtx(date){ const w = wx(date); return {date, high: w && w.max!=null ? w.max : null}; }
+const pieceAllowed = (p, ctx) => checksList().every(c=>!CHECK_TYPES[c.type].piece || CHECK_TYPES[c.type].piece(c, p, ctx));
+const pairBreaks = (p, q) => p.id!==q.id && checksList().some(c=>CHECK_TYPES[c.type].pair && CHECK_TYPES[c.type].pair(c, p, q));
+// The rules a finished look breaks (empty when it is fine). Used on plans written outside the engine.
+function lookBreaks(slots, date){
+  const ctx = checkCtx(date), ps = Object.values(slots||{}).filter(Boolean), broke = [];
+  checksList().forEach(c=>{ const t = CHECK_TYPES[c.type];
+    if((t.piece && ps.some(p=>!t.piece(c, p, ctx))) || (t.pair && ps.some((p,i)=>ps.slice(i+1).some(q=>t.pair(c, p, q))))) broke.push(c.rule || c.type); });
+  return broke;
+}
+// A plan written by Claude is set aside for the day if it breaks a check, and the engine dresses the day instead.
+function planDay(date){
+  const pd = S.plan && S.plan.days && S.plan.days.find(d=>d.date===date);
+  return pd && pd.outfit && pd.outfit.length && lookBreaks(slotsFrom(pd.outfit), date).length ? null : pd;
+}
+
 /* ---------------- outfit engine ---------------- */
 const NEUTRAL = /black|white|ivory|cream|grey|gray|charcoal|navy|camel|stone|beige|brown|tan|indigo|denim|taupe|sand/;
 const targetWarmth = need => ({outer: need>=4?5 : need===3?3 : 2, top: need>=4?4 : need===3?3 : need===2?2 : 1, bottom: need>=3?3 : 2, dress: need>=3?3:1, shoes: need>=5?3 : need>=3?2 : 1, accessory: need>=4?3 : 1});
@@ -374,8 +421,9 @@ function buildOne(date, opts){
   opts = opts || {};
   const scope = opts.scope !== undefined ? opts.scope : tripScope(date);
   const o = opts.occ || occasionFor(date).occ, w = wx(date), t = opts.feel!=null ? opts.feel : w ? w.feel : 12, need = band(t);
-  const st = stats(date), R = rules();
-  const pool = closet().filter(p=>!(opts.exclude && opts.exclude.has(p.id)) && usable(p, !!scope) && (scope ? scope.has(p.id) : (!p.occasions || !p.occasions.length || p.occasions.includes(o))));
+  const st = stats(date), R = rules(), ck = checkCtx(date);
+  // Style checks first: a piece Claude's rules rule out today never enters the pool, and picks below skip any piece that breaks a pairing rule.
+  const pool = closet().filter(p=>!(opts.exclude && opts.exclude.has(p.id)) && usable(p, !!scope) && pieceAllowed(p, ck) && (scope ? scope.has(p.id) : (!p.occasions || !p.occasions.length || p.occasions.includes(o))));
   const recentDays = id => {
     if(onRepeatSince(id, date)) return 2; // on repeat counts as worn in the last few days
     let l = st[id] && st[id].last; const pl = opts.planned && opts.planned[id];
@@ -424,7 +472,7 @@ function buildOne(date, opts){
   }
   const by = k => pool.filter(p=>slotOf(p)===k);
   const pick = (k, slot, chosen, filt) => {
-    const list = by(k).filter(p=>!filt || filt(p)).map(p=>{
+    const list = by(k).filter(p=>(!filt || filt(p)) && !chosen.some(c=>pairBreaks(c, p))).map(p=>{
       let s = score(p, slot);
       const stmt = chosen.filter(c=>c.statement).length;
       if(p.statement && stmt) s -= 2.5;
@@ -479,7 +527,7 @@ function buildOne(date, opts){
   if(!has('accessory') && (o==='customer' || need>=4)){ const x = pick('accessory','accessory',chosen); if(x && (o==='customer' || warmthOf(x)>=3)){slots.accessory=x;chosen.push(x);} }
   // A belt when the bottom has loops. Without loops, a long scarf takes the accent slot.
   const loops = hasLoops(slots.bottom);
-  if(loops && !slots.belt){ const b = beltFrom(by('belt'), beltWant(slots.bottom, need)); if(b){ slots.belt = b; chosen.push(b); } }
+  if(loops && !slots.belt){ const b = beltFrom(by('belt').filter(x=>!chosen.some(c=>pairBreaks(c, x))), beltWant(slots.bottom, need)); if(b){ slots.belt = b; chosen.push(b); } }
   const longScarf = p => p.shape==='scarf' && !/headband/i.test(p.name||'');
   if(slots.bottom && !loops && !slots.accessory && need>=2){ const x = pick('accessory','accessory',chosen,longScarf); if(x){ slots.accessory = x; chosen.push(x); } }
   // Bags are not part of a generated look any more. suggestBag() offers one under the look and she ticks it (swaps[date].bag).
@@ -638,7 +686,8 @@ function buildOutfit(date, opts){
   if(mode==='rediscover'){
     // Start from what's been out least (or, before there's history, what isn't loved or on repeat) and only keep it if the look holds up.
     const st = stats(date);
-    const pool = closet().filter(p=>usable(p, !!opts.scope) && ['top','dress','bottom','outer','shoes','accessory'].includes(slotOf(p)) && (!opts.scope || opts.scope.has(p.id)) && (!p.occasions || !p.occasions.length || p.occasions.includes(opts.occ || occasionFor(date).occ)));
+    const ck = checkCtx(date);
+    const pool = closet().filter(p=>usable(p, !!opts.scope) && pieceAllowed(p, ck) && ['top','dress','bottom','outer','shoes','accessory'].includes(slotOf(p)) && (!opts.scope || opts.scope.has(p.id)) && (!p.occasions || !p.occasions.length || p.occasions.includes(opts.occ || occasionFor(date).occ)));
     const restScore = p => { const l = st[p.id] && st[p.id].last; return (l ? Math.min(daysBetween(l,date),180) : 365) - (loved(p.id)?60:0) - (onRepeatSince(p.id,date)?300:0) + hash(date+p.id)*20; };
     const heroes = pool.sort((a,b)=>restScore(b)-restScore(a)).slice(0,6);
     const hc = [];
@@ -748,7 +797,7 @@ function homeLooks(){
     const logged = log().find(e=>e.date===date && e.source!=='sample' && e.items && e.items.length);
     if(logged){ logged.items.forEach(id=>planned[id] = date); continue; }
     if(activeTrip(date)) continue;
-    const pd = S.plan && S.plan.days && S.plan.days.find(d=>d.date===date);
+    const pd = planDay(date);
     if(pd && pd.outfit && pd.outfit.length){ pd.outfit.forEach(id=>planned[id] = date); continue; }
     const res = applySwaps(buildOutfit(date, {planned}), date);
     res.list.forEach(({p})=>planned[p.id] = date);
@@ -759,7 +808,7 @@ function homeLooks(){
 function outfitFor(date){
   let res, adjusted = null, fromPlan = false;
   const trip = activeTrip(date);
-  const pd = !trip && S.plan && S.plan.days && S.plan.days.find(d=>d.date===date);
+  const pd = !trip && planDay(date);
   const worn = log().find(e=>e.date===date && e.source!=='sample');
   if(worn && worn.items && worn.items.length){
     const slots = slotsFrom(worn.items);
@@ -1195,6 +1244,7 @@ async function pull(){
     S.style.inspo = mergeById(out.style.inspo, S.style.inspo);
     S.style.tryons = mergeById(out.style.tryons, S.style.tryons);
     S.style.rules = out.style.rules || S.style.rules || [];
+    S.style.checks = out.style.checks || S.style.checks || []; // Claude's too: always what is on GitHub
   }
   S.synced = Date.now(); persist();
 }
@@ -1212,7 +1262,7 @@ function queuePush(what){
       if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
       if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
       if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; if(cur.data && cur.data.feedback){ const fm = {}; [...cur.data.feedback, ...(S.vision.feedback||[])].forEach(f=>fm[f.id]=f); S.vision.feedback = Object.values(fm).sort((a,b)=>a.at-b.at).slice(-150); } await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
-      if(w.style){ const cur = await ghGet('data/style.json'); S.sha['data/style.json'] = cur.sha; if(cur.data && cur.data.rules) S.style.rules = cur.data.rules; await ghPut('data/style.json', S.style, 'Update style notes'); } // rules are Claude's, so keep whatever is on GitHub
+      if(w.style){ const cur = await ghGet('data/style.json'); S.sha['data/style.json'] = cur.sha; if(cur.data && cur.data.rules) S.style.rules = cur.data.rules; if(cur.data && cur.data.checks) S.style.checks = cur.data.checks; await ghPut('data/style.json', S.style, 'Update style notes'); } // rules are Claude's, so keep whatever is on GitHub
       S.synced = Date.now(); persist();
     }catch(e){ toast(e.message || 'Saved here. Will sync later.'); }
   }, 900);
@@ -1404,7 +1454,7 @@ const KINDS = {
   knits:[['jumpers','Jumpers',p=>p.cat==='top' && p.shape==='jumper'],['rollnecks','Roll-necks',p=>p.cat==='top' && p.shape==='knit'],['cardigans','Cardigans',p=>p.cat==='outer']],
   trousers:[['jeans','Jeans',p=>p.shape==='jeans' && !/shorts/.test(nm(p))],['trousers','Trousers',p=>p.shape!=='jeans' && !/shorts/.test(nm(p))],['shorts','Shorts',p=>/shorts/.test(nm(p))]],
   skirts:byLength, dresses:byLength,
-  shoes:[['trainers','Trainers',p=>p.shape==='trainer'],['boots','Boots',p=>p.shape==='boot'],['flats','Flats',p=>p.shape==='flat']],
+  shoes:[['trainers','Trainers',p=>p.shape==='trainer'],['boots','Boots',p=>p.shape==='boot'],['flats','Flats',p=>p.shape==='flat'],['sandals','Sandals',p=>p.shape==='sandal']],
   bags:[['crossbody','Crossbody',p=>/crossbody|pouch/.test(nm(p))],['shoulder','Shoulder and totes',p=>!/crossbody|pouch/.test(nm(p))]],
   extras:[['scarves','Scarves',p=>p.shape==='scarf'],['belts','Belts',p=>p.shape==='belt'],['straps','Bag straps',p=>p.shape==='strap']]
 };
@@ -1791,13 +1841,14 @@ function viewStyle(arg){
   if(arg==='inspo') return viewInspoForm();
   const loves = closet().filter(p=>loved(p.id));
   const looks = liveLooks(), ins = liveInspo(), tryons = liveTryons(), rulesL = (S.style.rules || []).map(r=>typeof r==='string' ? r : r.text);
+  const live = new Set(checksList().map(c=>(c.rule||'').trim())); // sentences the engine enforces
   const pane = STYLE_PANES.some(x=>x[0]===S.ui.stylePane) ? S.ui.stylePane : 'pieces';
   const whyOf = p => labelsOf(LOVE_WHY, (loved(p.id)||{}).why).join(' · ');
   const lede = loves.length>=3 ? 'What you love, what you wore, what caught your eye.' : 'Show the app what you love, so the looks start to sound like you. Claude reads everything here and writes your rules.';
   // Rules first: the most useful thing on the page.
   const shownRules = S.ui.rulesAll ? rulesL : rulesL.slice(0,3);
   const rulesCard = `<section class="panel rulescard"><span class="cap">What Claude has learned</span>
-    ${rulesL.length ? `<ul class="learned">${shownRules.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>${rulesL.length>3 ? `<div class="acts"><button type="button" class="linkish" data-act="rulesall">${S.ui.rulesAll ? 'Show fewer' : `See all ${rulesL.length}`}</button></div>` : ''}`
+    ${rulesL.length ? `<ul class="learned">${shownRules.map(r=>`<li>${esc(r)}${live.has((r||'').trim()) ? ' <span class="tag off" title="The looks are built to obey this one">Applied</span>' : ''}</li>`).join('')}</ul>${rulesL.length>3 ? `<div class="acts"><button type="button" class="linkish" data-act="rulesall">${S.ui.rulesAll ? 'Show fewer' : `See all ${rulesL.length}`}</button></div>` : ''}`
       : `<p class="caption pad">Nothing yet. Once you have added a few loves, looks and pictures, Claude can read them.</p><div class="acts"><button type="button" class="btn ghost" data-act="readstyle">Read my style</button></div>`}</section>`;
   const counts = {pieces:loves.length, looks:looks.length, tryons:tryons.length, inspo:ins.length};
   const seg = `<nav class="stylepanes segs" role="tablist" aria-label="Style">${STYLE_PANES.map(([k,l])=>`<button type="button" class="label" role="tab" data-stylepane="${k}" aria-pressed="${k===pane}">${l}${counts[k]?`<span class="n">${counts[k]}</span>`:''}</button>`).join('')}</nav>`;
