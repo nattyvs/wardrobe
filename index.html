@@ -208,6 +208,61 @@ button.tag{cursor:pointer}
 .picklist .th svg,.picklist .th img{max-height:44px;width:auto}
 .picklist .nm{font:400 16px/1.2 var(--didot)}
 .picklist .sub{display:block;font-size:11.5px;color:var(--ink-2);font-family:var(--jost)}
+/* packing sheet: the category row stays under the header and scrolls on its own */
+.sheet .sheethead{position:sticky;top:0;z-index:4;background:var(--panel)}
+.sheet .sheethead .bar{position:static}
+.sheet .sheethead .filters{padding-top:12px;padding-bottom:10px;border-bottom:1px solid var(--rule-soft);overscroll-behavior-x:contain}
+.sheet.packonly .packlist li:not(:has(.check:checked)){display:none}
+.sheet.packonly .group:not(:has(.check:checked)){display:none}
+/* style tab: rules on top, one pane at a time */
+.rulescard{margin-top:18px}
+.rulescard .learned li:last-child{border-bottom:0}
+.stylepanes{position:sticky;top:0;z-index:6;background:var(--paper);border-bottom:1px solid var(--rule-soft);gap:14px;padding-bottom:0}
+.stylepanes .label{letter-spacing:.14em;padding-bottom:10px;white-space:nowrap}
+.stylepanes .n{margin-left:5px;color:var(--ink-2);font-weight:400}
+.stylepane .empty{padding:18px var(--gutter-r) 0 var(--gutter)}
+.panehead{display:flex;justify-content:space-between;align-items:baseline;padding:14px var(--gutter-r) 0 var(--gutter)}
+.panehead .linkish{min-height:44px;display:inline-flex;align-items:center;margin-top:-14px}
+.grid.four{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 10px;padding-top:6px}
+.grid.four .item .img{display:block}
+.grid.four .tile .love{transform:scale(.8);transform-origin:top left}
+.sgrid{list-style:none;margin:0;padding:6px var(--gutter-r) 6px var(--gutter);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 14px}
+.sgrid li{display:grid;gap:6px;align-content:start;min-width:0}
+.sgrid .ph{display:block;position:relative;width:100%;padding:0;border:0;background:var(--paper);aspect-ratio:3/4;overflow:hidden}
+.sgrid .ph img{width:100%;height:100%;object-fit:cover;display:block}
+.sgrid .ph.flat{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:6px;background:var(--panel)}
+.sgrid .ph.flat span{display:grid;place-items:center;min-height:0}
+.sgrid .ph.flat img,.sgrid .ph.flat svg{max-width:100%;max-height:100%}
+.sgrid .in-link{display:grid;place-items:center;height:100%;font:400 18px/1 var(--didot);color:var(--ink-2)}
+.sgrid .pstrip{display:flex;gap:3px;flex-wrap:wrap}
+.sgrid .pstrip span{width:26px;height:26px;display:grid;place-items:center}
+.sgrid .pstrip img,.sgrid .pstrip svg{max-width:100%;max-height:100%}
+.sgrid .sub{font:500 9.5px/1.4 var(--jost);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2)}
+.sgrid .note{font-size:13px;line-height:1.4}
+.sgrid .linkish{justify-self:start}
+.sgrid .badge{position:absolute;left:6px;top:6px;background:var(--panel);font:500 9px/1 var(--jost);letter-spacing:.14em;text-transform:uppercase;padding:4px 6px}
+.sgrid .deciders{display:flex;gap:14px}
+.pagehead .toprow{grid-column:2;grid-row:1 / span 2;align-self:start;display:flex;align-items:center;gap:4px;margin-top:-8px}
+.pagehead .toprow .toplink{margin-top:0;padding-left:10px;grid-column:auto;grid-row:auto}
+.ownbtn{display:grid;place-items:center;width:44px;height:44px;background:none;border:0;color:var(--ink)}
+/* what else to pack */
+.recs{list-style:none;margin:0;padding:0 var(--gutter-r) 0 var(--gutter)}
+.recs li{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--rule-soft)}
+.recs .th{height:44px;display:grid;place-items:center}
+.recs .th svg,.recs .th img{max-height:44px;width:auto}
+.recs .nm{display:block;font:400 16px/1.2 var(--didot)}
+.recs .sub{display:block;font-size:12.5px;color:var(--ink-2)}
+.recs .leave .nm{font:500 10.5px/1.2 var(--jost);letter-spacing:.22em;text-transform:uppercase}
+.recs .linkish{min-height:44px;display:inline-flex;align-items:center}
+.packrecs .caption.pad{padding-inline:var(--gutter) var(--gutter-r);margin:12px 0 0}
+/* a suggested bag sits under the look: dashed and quiet until she ticks it */
+.bagrow{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;margin:14px var(--gutter-r) 0 var(--gutter);padding:8px 12px;border:1px dashed var(--rule-soft);opacity:.62;transition:opacity .2s var(--ease)}
+.bagrow.on{opacity:1;border:1px solid var(--rule-soft)}
+.bagrow .th{height:40px;display:grid;place-items:center}
+.bagrow .th svg,.bagrow .th img{max-height:40px;width:auto}
+.bagrow .bg{display:grid;grid-template-columns:22px 1fr;gap:12px;align-items:center;cursor:pointer}
+.bagrow .nm{display:block;font:500 10.5px/1.2 var(--jost);letter-spacing:.22em;text-transform:uppercase}
+.bagrow .sub{display:block;font-size:12.5px;color:var(--ink-2)}
 .check{appearance:none;width:22px;height:22px;border:1px solid var(--ink);margin:0;display:grid;place-items:center;background:var(--paper)}
 .check:checked{background:var(--ink)}
 .check:checked::after{content:"";width:10px;height:5px;border-left:1.5px solid var(--paper);border-bottom:1.5px solid var(--paper);transform:translateY(-1px) rotate(-45deg)}
