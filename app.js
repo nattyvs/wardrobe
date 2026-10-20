@@ -2100,7 +2100,7 @@ function viewTrip(id, sub){
 
 /* ---------------- sheets ---------------- */
 function openSheet(html){ document.body.classList.add('sheet-open'); const s=$('#sheet'); s.onscroll=null; s.classList.remove('packonly'); s.innerHTML=html; s.classList.add('open'); $('#scrim').classList.add('open'); setTimeout(()=>{ const f=s.querySelector('[data-close]'); f&&f.focus(); }, 50); }
-function closeSheet(){ document.body.classList.remove('sheet-open'); $('#sheet').classList.remove('open'); $('#scrim').classList.remove('open'); }
+function closeSheet(){ S.ui.sheetBack = null; document.body.classList.remove('sheet-open'); $('#sheet').classList.remove('open'); $('#scrim').classList.remove('open'); }
 function ruleLine(r, id){
   if(r.kind==='pair'){ const other = piece(r.a===id ? r.b : r.a); return `Not paired with the ${other ? other.name.toLowerCase() : 'other piece'} after ${r.n} "Colours looked dead" reports.`; }
   return ruleText(r);
@@ -2138,7 +2138,8 @@ function sheetPiece(id, tab){
   const mine = rules().list.filter(r=>r.id===id || r.a===id || r.b===id);
   const learned = mine.length ? `<div class="field"><span class="cap">What the app has learned</span>${mine.map(r=>`<p class="rule-row">${esc(ruleLine(r,id))} <button type="button" class="linkish" data-act="undorule" data-key="${esc(r.key)}" data-n="${r.n}" data-id="${esc(id)}">Undo</button></p>`).join('')}</div>` : '';
   const cls = faceClass(p);
-  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">${esc(p.cat==='accessory'?'Accessory':cap1(p.cat==='outer'?'Outerwear':p.cat))}</span><button type="button" class="linkish" data-close>Close</button></div>
+  const back = S.ui.sheetBack, backLabel = back ? (back.kind==='own' ? 'Do I own this?' : 'Inspiration') : '';
+  openSheet(`<div class="bar">${back?`<button type="button" class="linkish back" data-act="backmatch" aria-label="Back to ${esc(backLabel)}">&#8249; Back</button>`:''}<span class="cap" id="sheetTitle">${esc(p.cat==='accessory'?'Accessory':cap1(p.cat==='outer'?'Outerwear':p.cat))}</span><button type="button" class="linkish" data-close>Close</button></div>
     <div class="big">${art(p)}</div>
     <h2 class="sec">${esc(p.name)}</h2>
     <div class="segs ptabs" role="tablist" aria-label="Sections">${tabsHTML}</div>
@@ -2594,7 +2595,11 @@ document.addEventListener('click', async e=>{
   if(t.dataset.packonly){ S.ui.packOnly = !S.ui.packOnly; $('#sheet').classList.toggle('packonly', S.ui.packOnly); t.setAttribute('aria-pressed', S.ui.packOnly); if(S.ui.packOnly) $('#sheet').scrollTo({top:0}); return; }
   if(t.dataset.stylepane){ S.ui.stylePane = t.dataset.stylepane; render(); return; }
   if(t.dataset.inspoopen){ sheetInspo(t.dataset.inspoopen); return; }
-  if(t.dataset.piece){ sheetPiece(t.dataset.piece); return; }
+  if(t.dataset.piece){
+    // From a match row in the "Do I own this?" or inspiration sheet: remember where she came from, so Back returns there.
+    const vm = t.closest('.vm'), insp = t.closest('#inspomatches');
+    S.ui.sheetBack = vm && insp ? {kind:'inspo', id:insp.dataset.inspo} : vm && t.closest('#ownbody') ? {kind:'own'} : null;
+    sheetPiece(t.dataset.piece); return; }
   if(t.dataset.filter){ location.hash = '#closet/'+t.dataset.filter; return; }
   if(t.dataset.ctype){ const cf = closetFilters(); cf.type = t.dataset.ctype; cf.kind = null; render(); window.scrollTo({top:0}); return; }
   if(t.dataset.ckind){ const cf = closetFilters(); cf.kind = cf.kind===t.dataset.ckind ? null : t.dataset.ckind; render(); return; }
@@ -2634,6 +2639,7 @@ document.addEventListener('click', async e=>{
   if(act==='closedrawer'){ S.ui.drawer = false; const d = document.querySelector('.cdrawer'), sc = document.querySelector('.cscrim'); if(d) d.classList.remove('open'); if(sc) sc.classList.remove('open'); setTimeout(render, 260); return; }
   if(act==='clearfilters'){ S.ui.cf = {type:closetFilters().type, kind:null, colours:[], q:''}; if((S.ui.closetFilter||'all')!=='all'){ location.hash = '#closet'; } render(); return; }
   if(act==='backpiece'){ sheetPiece(t.dataset.id); return; }
+  if(act==='backmatch'){ const b = S.ui.sheetBack; S.ui.sheetBack = null; if(b && b.kind==='inspo') sheetInspo(b.id); else sheetOwn(); return; }
   if(act==='lookswith' || act==='withmore'){ t.textContent = 'Putting looks together…'; t.disabled = true; const id = t.dataset.id, r = act==='withmore' ? +t.dataset.round : 0; setTimeout(()=>sheetWith(id, r), 30); return; }
   if(act==='withtry'){ const o = (S.ui.withLooks||[])[+t.dataset.i]; if(o) sheetTryOn('look', o); return; }
   if(act==='withtoday'){ const o = (S.ui.withLooks||[])[+t.dataset.i]; if(!o) return; pinLook(TODAY, o.list.map(x=>x.p.id)); closeSheet(); location.hash = '#today'; render(); toast('Today’s look'); return; }
