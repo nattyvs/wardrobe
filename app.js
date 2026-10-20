@@ -461,6 +461,7 @@ function buildOne(date, opts){
     // Freshness. On a trip the suitcase is meant to be worn again and again, and a coat can be worn all week:
     // only avoid the same piece two days running.
     if(opts.scope){ const n = (opts.uses && opts.uses[p.id]) || 0, light = slot==='outer' || slot==='shoes';
+      if(!light && opts.cap && n>=opts.cap) s -= 6; // on a long trip no top, bottom or dress carries more than about a third of the days
       if(!light && ago<1.5) s -= 2.5; s += Math.min(ago, 6)/12 - n*(light ? .15 : opts.fresh ? 1.6 : .55); } // no laundry: a clean top for each day, so a piece already worn on the trip counts against it more
     else if(slot==='outer'){ s += Math.min(ago, 120)/240; }
     else {
@@ -941,7 +942,7 @@ function planLooks(t, ids){
   tripDays(t).forEach(date=>{
     const logged = log().find(e=>e.date===date && e.source!=='sample' && e.items && e.items.length);
     if(logged){ logged.items.forEach(id=>markPlanned(planned, id, date)); return; }
-    const res = applySwaps(buildOutfit(date, {scope, planned, uses, fresh:t.laundry===false}), date);
+    const res = applySwaps(buildOutfit(date, {scope, planned, uses, fresh:t.laundry===false, cap:Math.ceil(tripDays(t).length/3)}), date);
     res.list.forEach(({p})=>{ markPlanned(planned, p.id, date); sidesOf(p.id).forEach(x=>{ uses[x] = (uses[x]||0)+1; }); });
     looks[date] = res;
   });
@@ -1038,32 +1039,40 @@ function packTrip(t){
   }
   const shoes = choose('shoes', D<=2 ? 1 : (carryOn || D<8 ? 2 : 3));
   // A hot or beach trip with dresses, skirts or shorts going gets one pair of sandals, if the checks let a look use them on some day.
+  // Sightseeing: one slot is always a walking shoe (trainer), whatever the heat. Warmth scoring alone would hand it to flats.
+  const walking = acts.has('sightseeing') && D>2 && !shoes.some(p=>p.shape==='trainer');
+  if(walking){
+    const tr = pool.filter(p=>p.shape==='trainer' && slotOf(p)==='shoes').sort((a,b)=>base(b,'shoes')-base(a,'shoes'))[0];
+    const drop = shoes.slice().reverse().find(p=>!mineSet.has(p.id));
+    if(tr && (drop || shoes.length < (carryOn || D<8 ? 2 : 3))){ if(drop) shoes.splice(shoes.indexOf(drop), 1); shoes.push(tr); }
+  }
   const skirtish = dresses.length || bottoms.some(b=>b.shape==='skirt' || /shorts/i.test(b.name||''));
   if(lean && skirtish && D>2 && !shoes.some(p=>p.shape==='sandal')){
     const sand = pool.filter(p=>p.shape==='sandal' && slotOf(p)==='shoes' && ctx.some(c=>pieceAllowed(p, {date:c.date, high:c.w && c.w.max!=null ? c.w.max : null})))
       .sort((a,b)=>base(b,'shoes')-base(a,'shoes'))[0];
-    const drop = shoes.slice().reverse().find(p=>!mineSet.has(p.id));
+    const drop = shoes.slice().reverse().find(p=>!mineSet.has(p.id) && p.shape!=='trainer');
     if(sand && (drop || shoes.length < (carryOn || D<8 ? 2 : 3))){ if(drop) shoes.splice(shoes.indexOf(drop), 1); shoes.push(sand); }
+  }
+  shoes.filter(p=>p.shape==='trainer' || p.shape==='sandal').forEach(p=>keep.add(p.id)); // a walking shoe or beach sandal that was asked for stays even if the planner prefers flats
+  {
   }
   const scarf = eveNeed>=3 ? choose('accessory', 1, p=>p.shape==='scarf' && !/headband/i.test(p.name||'')) : [];
   const belts = pool.filter(p=>slotOf(p)==='belt'), beltsIn = [];
   const medianNeed = days.map(d=>d.need).sort((a,b)=>a-b)[Math.floor(days.length/2)];
   bottoms.filter(hasLoops).forEach(b=>{ const x = beltFrom(belts, beltWant(b, medianNeed)); if(x && !beltsIn.includes(x)) beltsIn.push(x); });
   let ids = [...new Set([].concat(bottoms, tops, dresses, outers, shoes, scarf, beltsIn, mineP).map(p=>p.id))];
+  const floor = {top:tops.length, bottom:bottoms.length, dress:dresses.length}; // pruning never takes these below what the formula asked for
   // Rest the pieces no look wore, and any bottom worn only once when there are others to share the days.
   for(let pass=0; pass<8; pass++){
     const use = usageCount(planLooks(t, ids));
-    let next = ids.filter(id=>(use[id]||0)>0 || keep.has(id));
-    if(D>=4){
-      const bs = next.map(piece).filter(p=>p && p.cat==='bottom' && !mineSet.has(p.id)).sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
-      if(bs.length>1 && (use[bs[0].id]||0)<2) next = next.filter(id=>id!==bs[0].id);
-    }
-    // Tops and dresses worn once are only dropped while there are more than two tops to each bottom (the 2:1 target), and not at all without laundry.
-    const nTops = next.map(piece).filter(p=>p && p.cat==='top').length, nBots = next.map(piece).filter(p=>p && p.cat==='bottom').length;
-    if(laundry && D>=6 && next.length===ids.length){
-      const tp = next.map(piece).filter(p=>p && (p.cat==='top' || p.cat==='dress') && !mineSet.has(p.id)).sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
-      if(tp.length>2 && (use[tp[0].id]||0)<2 && (tp[0].cat==='dress' || nTops > 2*nBots)) next = next.filter(id=>id!==tp[0].id);
-    }
+    // Pieces no look wore are rested, except tops, bottoms and dresses down to their starting count: on a long trip a piece worn once is fine.
+    let next = ids.slice();
+    const catN = c => next.map(piece).filter(p=>p && p.cat===c).length;
+    ids.slice().sort((a,b)=>(use[a]||0)-(use[b]||0)).forEach(id=>{
+      const p = piece(id); if(!p || (use[id]||0)>0 || keep.has(id)) return;
+      if(floor[p.cat]!=null && catN(p.cat) <= floor[p.cat]) return;
+      next = next.filter(x=>x!==id);
+    });
     if(next.length===ids.length) break;
     ids = next;
   }
@@ -1079,7 +1088,7 @@ function tripReasons(t){
   const out = {};
   const vl = validLooks(withSides(tripPackedIds(t)), ctx);
   packed.forEach(p=>{
-    const k = use[p.id]||0, c = vl.use[p.id]||0, bits = [];
+    const k = use[p.id]||0, c = Math.max(vl.use[p.id]||0, k), bits = []; // a look that was planned is a possible look
     if((t.mine||[]).includes(p.id)) bits.push('You are taking this');
     else if(p.cat==='bag' && !(t.packed||[]).includes(p.id)) bits.push('Ticked in a look');
     if(layer && layer.id===p.id) bits.push(`Your layer for the coolest evening, ${minT}°`);
