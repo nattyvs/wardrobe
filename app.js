@@ -1188,18 +1188,24 @@ async function ghGet(path){
   if(!r.ok) throw new Error(r.status===401 ? 'The token was refused. Check it in Settings.' : `GitHub said ${r.status} for ${path}.`);
   const j = await r.json(); return {sha:j.sha, data:JSON.parse(b64dec(j.content||'')||'null')};
 }
-async function ghPut(path, data, message){
-  const body = {message, content: b64enc(JSON.stringify(data,null,2)+'\n')};
-  if(S.sha[path]) body.sha = S.sha[path];
-  let r = await fetch(ghURL(path), {method:'PUT', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify(body)});
-  if(r.status===409 || r.status===422){ const cur = await ghGet(path); body.sha = cur.sha; r = await fetch(ghURL(path), {method:'PUT', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify(body)}); }
-  if(!r.ok) throw new Error(`Couldn't save ${path} (${r.status}).`);
-  const j = await r.json(); S.sha[path] = j.content.sha;
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+let ghChain = Promise.resolve();
+// GitHub answers 409 when two commits to the same branch overlap. So every write goes through one line, one at a time,
+// and a refused one is tried again a moment later with a fresh sha.
+const ghSerial = fn => { const run = ghChain.then(fn, fn); ghChain = run.catch(()=>{}); return run; };
+async function ghSend(path, message, content, withSha){
+  for(let attempt=0; ; attempt++){
+    const body = {message, content}; if(withSha && S.sha[path]) body.sha = S.sha[path];
+    const r = await fetch(ghURL(path), {method:'PUT', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify(body)});
+    if(r.ok) return r.json();
+    const again = r.status===409 || (withSha && r.status===422) || r.status>=500;
+    if(!again || attempt>=3) throw new Error(withSha ? `Couldn't save ${path} (${r.status}).` : `Couldn't upload the photo (${r.status}).`);
+    await sleep(600*(attempt+1));
+    if(withSha) S.sha[path] = (await ghGet(path)).sha;
+  }
 }
-async function ghPutRaw(path, b64, message){
-  const r = await fetch(ghURL(path), {method:'PUT', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify({message, content:b64})});
-  if(!r.ok) throw new Error(`Couldn't upload the photo (${r.status}).`);
-}
+const ghPut = (path, data, message) => ghSerial(async()=>{ const j = await ghSend(path, message, b64enc(JSON.stringify(data,null,2)+'\n'), true); S.sha[path] = j.content.sha; });
+const ghPutRaw = (path, b64, message) => ghSerial(()=>ghSend(path, message, b64, false));
 async function loadPhoto(path){
   if(S.photos[path] || loadPhoto.busy[path]) return; loadPhoto.busy[path] = true;
   try{
@@ -1248,24 +1254,40 @@ async function pull(){
   }
   S.synced = Date.now(); persist();
 }
-let pushTimer = null;
+let pushTimer = null, pushChain = Promise.resolve(), pushFails = 0;
 function queuePush(what){
   persist();
   if(!ghReady()) return;
   queuePush.what = Object.assign(queuePush.what||{}, what);
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(async ()=>{
-    const w = queuePush.what; queuePush.what = {};
-    try{
-      if(w.log) await ghPut('data/wearlog.json', {entries:S.log.filter(e=>e.source!=='sample')}, 'Log what I wore');
-      if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes, dormant:S.state.dormant, wearSoon:S.state.wearSoon, since:S.state.since}, 'Update day settings');
-      if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
-      if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
-      if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; if(cur.data && cur.data.feedback){ const fm = {}; [...cur.data.feedback, ...(S.vision.feedback||[])].forEach(f=>fm[f.id]=f); S.vision.feedback = Object.values(fm).sort((a,b)=>a.at-b.at).slice(-150); } await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
-      if(w.style){ const cur = await ghGet('data/style.json'); S.sha['data/style.json'] = cur.sha; if(cur.data && cur.data.rules) S.style.rules = cur.data.rules; if(cur.data && cur.data.checks) S.style.checks = cur.data.checks; await ghPut('data/style.json', S.style, 'Update style notes'); } // rules are Claude's, so keep whatever is on GitHub
-      S.synced = Date.now(); persist();
-    }catch(e){ toast(e.message || 'Saved here. Will sync later.'); }
-  }, 900);
+  pushTimer = setTimeout(schedulePush, 900);
+}
+// One push at a time: a second one starting while the first is still running is what made GitHub answer 409.
+function schedulePush(){ pushChain = pushChain.then(runPush).catch(()=>{}); }
+async function runPush(){
+  const w = queuePush.what || {}; queuePush.what = {};
+  if(!Object.keys(w).length) return;
+  try{
+    if(w.log) await ghPut('data/wearlog.json', {entries:S.log.filter(e=>e.source!=='sample')}, 'Log what I wore');
+    if(w.state) await ghPut('data/state.json', {dayOcc:S.state.dayOcc, swaps:S.state.swaps, onRepeat:S.state.onRepeat, ruleOff:S.state.ruleOff, modes:S.state.modes, dormant:S.state.dormant, wearSoon:S.state.wearSoon, since:S.state.since}, 'Update day settings');
+    if(w.closet) await ghPut('data/closet.json', {pieces:S.closet}, 'Update closet');
+    if(w.trips) await ghPut('data/trips.json', {trips:S.trips}, 'Update trips');
+    if(w.vision){ const cur = await ghGet('data/vision.json'); S.sha['data/vision.json'] = cur.sha; if(cur.data && cur.data.corrections) S.vision.corrections = cur.data.corrections; if(cur.data && cur.data.feedback){ const fm = {}; [...cur.data.feedback, ...(S.vision.feedback||[])].forEach(f=>fm[f.id]=f); S.vision.feedback = Object.values(fm).sort((a,b)=>a.at-b.at).slice(-150); } await ghPut('data/vision.json', S.vision, 'Vision matches'); } // corrections are Claude's
+    if(w.style){
+      const cur = await ghGet('data/style.json'), theirs = cur.data || {}; S.sha['data/style.json'] = cur.sha;
+      // Rules and checks are Claude's: keep whatever is on GitHub. Any other key Claude adds to the file survives too,
+      // because only the keys this app knows are written over it. (An older copy of the app once dropped the checks this way.)
+      if(theirs.rules) S.style.rules = theirs.rules;
+      if(theirs.checks) S.style.checks = theirs.checks;
+      await ghPut('data/style.json', Object.assign({}, theirs, S.style), 'Update style notes');
+    }
+    S.synced = Date.now(); persist(); pushFails = 0;
+  }catch(e){
+    // Put the work back and try again shortly, a few times, so a busy moment on GitHub never loses a change.
+    queuePush.what = Object.assign({}, w, queuePush.what||{});
+    if(++pushFails <= 3){ clearTimeout(pushTimer); pushTimer = setTimeout(schedulePush, 4000*pushFails); }
+    else { pushFails = 0; toast((e.message || 'Saved here.') + ' It is kept on this phone and will sync with the next change.'); }
+  }
 }
 
 /* ---------------- router ---------------- */
@@ -1675,6 +1697,7 @@ function viewSettings(){
     <div class="field"><label class="cap" for="repo">Data repo</label><input id="repo" value="${esc(settings.repo)}" autocomplete="off" spellcheck="false"><span class="hint">Owner and name, like nattyvs/wardrobe-private.</span></div>
     <div class="field"><label class="cap" for="token">GitHub token</label><input id="token" type="password" value="${esc(settings.token)}" autocomplete="off" spellcheck="false" placeholder="github_pat_…"><span class="hint">A fine-grained token with read and write access to that repo's contents. It stays on this phone.</span></div>
     <div class="toggles"><label class="toggle"><span>Sample wardrobe<small>Show the demo pieces instead of yours.</small></span><input type="checkbox" class="switch" id="sample" ${settings.sample?'checked':''}></label></div>
+    <div class="field"><span class="cap">Vision model</span><span class="hint">${visionDownloaded() ? `On this phone${Object.keys(embStore().items).length ? `, with ${Object.keys(embStore().items).length} of ${closet().filter(p=>p.photo).length} pieces learned` : ''}.` : 'Not downloaded yet. It downloads about 90 MB the first time you use "Do I already own this?" or "Find it in my closet".'}</span></div>
     <div class="field"><a class="linkish" href="#trips">Trips and packing</a></div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savesettings">Save and sync</button><a class="btn ghost" href="#log">Back</a></div>
     <div class="field"><span class="hint">Last synced: ${esc(when)}. Forecast from Open-Meteo for ${esc(settings.city)}.</span></div>
@@ -1686,18 +1709,39 @@ function viewSettings(){
    It suggests; it never decides. Claude checks its matches in the Sunday review and writes corrections. */
 const VISION_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
 const VISION_MODEL = 'Xenova/clip-vit-base-patch32';
-const V = {lib:null, proc:null, model:null, loading:null, busy:'', progress:''};
+const V = {lib:null, proc:null, model:null, loading:null, busy:'', pct:null, err:'', errRef:null, running:null};
+// What the model is doing right now, shown in place wherever a [data-vstat] box is open (the inspiration sheet, the "Do I own this?" sheet).
+function visionSay(msg, pct){
+  V.busy = msg || ''; V.pct = msg && pct!=null ? pct : null;
+  document.querySelectorAll('[data-vstat]').forEach(el=>{ el.innerHTML = visionStatusInner(); el.hidden = !V.busy && !V.err; });
+}
+function visionStatusInner(){
+  if(V.err) return `<span class="verr">${esc(V.err)}</span>`;
+  return V.busy ? `<span>${esc(V.busy)}</span>${V.pct!=null?`<i class="vbar" aria-hidden="true"><b style="width:${V.pct}%"></b></i>`:''}` : '';
+}
+const visionStatusHTML = () => `<div class="vstat caption pad" data-vstat role="status" aria-live="polite"${V.busy||V.err?'':' hidden'}>${visionStatusInner()}</div>`;
+const visionDownloaded = () => !!(LS.get('wd.vision', null) || {}).ready || Object.keys(embStore().items).length>0;
 async function visionReady(){
   if(V.model) return true;
   if(!V.loading) V.loading = (async()=>{
-    V.busy = 'Downloading the vision model (about 90 MB, once)…'; render();
+    const first = !visionDownloaded();
+    visionSay(first ? 'Downloading the vision model (about 90 MB, once)…' : 'Loading the vision model…', first ? 0 : null);
     const lib = await import(VISION_LIB);
     lib.env.allowLocalModels = false;
     V.lib = lib;
-    V.proc = await lib.AutoProcessor.from_pretrained(VISION_MODEL);
-    V.model = await lib.CLIPVisionModelWithProjection.from_pretrained(VISION_MODEL);
-    V.busy = ''; return true;
-  })().catch(e=>{ V.loading = null; V.busy = ''; throw new Error("The vision model couldn't load: "+(e && e.message || e)); });
+    // The library reports each file as it downloads. Add them up so the bar moves.
+    const files = {};
+    const progress_callback = d => {
+      if(!d || d.status!=='progress' || !d.file) return;
+      files[d.file] = {l: d.loaded||0, t: d.total||0};
+      const t = Object.values(files).reduce((a,x)=>a+x.t, 0), l = Object.values(files).reduce((a,x)=>a+x.l, 0);
+      if(t) { const pct = Math.min(99, Math.round(100*l/t)); visionSay(first ? `Downloading the vision model: ${pct}% of about 90 MB (once)` : `Loading the vision model: ${pct}%`, pct); }
+    };
+    V.proc = await lib.AutoProcessor.from_pretrained(VISION_MODEL, {progress_callback});
+    V.model = await lib.CLIPVisionModelWithProjection.from_pretrained(VISION_MODEL, {progress_callback});
+    LS.set('wd.vision', {ready:true, at:Date.now()});
+    visionSay(''); return true;
+  })().catch(e=>{ V.loading = null; visionSay(''); throw new Error("The vision model couldn't load: "+(e && e.message || e)); });
   return V.loading;
 }
 // Cut-outs are transparent, so put every picture on white first. Optional crop as fractions [y0, y1].
@@ -1725,7 +1769,7 @@ async function closetEmbeddings(){
   const store = embStore(), todo = closet().filter(p=>p.photo && (!store.items[p.id] || store.items[p.id].photo!==p.photo));
   let i = 0;
   for(const p of todo){
-    i++; V.busy = `Looking at your closet: ${i} of ${todo.length}`; if(i%5===1) render();
+    i++; visionSay(`Learning your closet: ${i} of ${todo.length}`, Math.round(100*i/todo.length));
     try{
       const r = await fetch(ghURL(p.photo), {headers:ghHeaders({Accept:'application/vnd.github.raw'})}); if(!r.ok) continue;
       const v = await embedBlob(await whiteBlob(await r.blob()));
@@ -1733,7 +1777,7 @@ async function closetEmbeddings(){
       if(i%10===0) LS.set('wd.emb', store);
     }catch(e){}
   }
-  LS.set('wd.emb', store); V.busy = '';
+  LS.set('wd.emb', store); visionSay('');
   const out = {}; Object.entries(store.items).forEach(([id, x])=>{ if(piece(id)) out[id] = b64ToF32(x.v); }); return out;
 }
 const dot = (a,b) => { let s = 0; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; };
@@ -1765,14 +1809,14 @@ function adjust(id, base, q){
 // Upper part of a picture for tops and coats, lower part for bottoms and shoes, the whole for dresses.
 async function matchPicture(file, ref){
   const E = await closetEmbeddings();
-  V.busy = 'Comparing…'; render();
+  visionSay('Comparing with your closet…');
   const q = {whole: await embedBlob(await whiteBlob(file)), upper: await embedBlob(await whiteBlob(file, [0, .55])), lower: await embedBlob(await whiteBlob(file, [.45, 1]))};
   if(ref) keepQuery(ref, q);
   const wrong = wrongFor(ref), byCat = {};
   closet().forEach(p=>{ if(!E[p.id] || wrong.has(p.id)) return; const r = REGION[p.cat]||'whole', s = adjust(p.id, dot(E[p.id], q[r]), q); (byCat[p.cat] = byCat[p.cat] || []).push({id:p.id, sim:Math.round(s*1000)/1000}); });
   Object.values(byCat).forEach(a=>a.sort((x,y)=>y.sim-x.sim));
   const overall = closet().filter(p=>E[p.id] && !wrong.has(p.id)).map(p=>({id:p.id, sim:Math.round(adjust(p.id, dot(E[p.id], q.whole), q)*1000)/1000})).sort((a,b)=>b.sim-a.sim).slice(0,8);
-  V.busy = '';
+  visionSay('');
   return {byCat: Object.fromEntries(Object.entries(byCat).map(([k,a])=>[k, a.slice(0,4)])), overall};
 }
 function tapMatch(ref, id, ok, region){
@@ -1783,17 +1827,21 @@ function tapMatch(ref, id, ok, region){
   queuePush({vision:true});
   return f.ok;
 }
-function logVision(entry){ S.vision = S.vision || {entries:[], corrections:{}, feedback:[]}; S.vision.entries = [entry, ...(S.vision.entries||[])].slice(0,200); queuePush({vision:true}); }
+function logVision(entry){ S.vision = S.vision || {entries:[], corrections:{}, feedback:[]}; S.vision.entries = [entry, ...(S.vision.entries||[]).filter(e=>!(entry.kind==='inspo' && e.kind==='inspo' && e.ref===entry.ref))].slice(0,200); queuePush({vision:true}); } // running it again on the same picture replaces its entry
 async function runInspoMatch(id){
   const x = (S.style.inspo||[]).find(y=>y.id===id); if(!x || !x.preview) return;
+  if(V.running){ toast(V.running===id ? 'Still looking. The bar shows where it is.' : 'Still busy with another picture.'); return; }
+  V.running = id; V.err = ''; V.errRef = null; refreshInspoSheet(id); visionSay('Starting…');
   try{
     const blob = await (await fetch(x.preview)).blob();
     const r = await matchPicture(blob, id);
     x.matches = {byCat:r.byCat, at:Date.now()}; x.updated = Date.now();
     logVision({id:'v-'+Date.now().toString(36), at:Date.now(), kind:'inspo', ref:id, byCat:r.byCat});
     queuePush({style:true});
-  }catch(err){ V.busy = ''; toast(err.message || 'The vision model failed.'); }
+  }catch(err){ V.err = err.message || 'The vision model failed.'; V.errRef = id; visionSay(''); }
+  V.running = null;
   if(route().name==='style') render();
+  refreshInspoSheet(id);
 }
 const simWord = s => s>=.92 ? 'Very close' : s>=.85 ? 'Close' : s>=.78 ? 'Similar' : 'Loosely similar';
 function matchRow(ms, ref, whole){
@@ -1825,11 +1873,24 @@ const pairLoved = (a,b) => lovedPairs().has(a<b ? a+'|'+b : b+'|'+a);
 function tagChips(list, chosen, attr){
   return `<div class="segs wrap" role="group">${list.map(([k,l])=>`<button type="button" class="label" ${attr}="${k}" aria-pressed="${chosen.includes(k)}">${l}</button>`).join('')}</div>`;
 }
-function inspoMatchesHTML(x){
-  if(!x.preview) return '';
-  if(!x.matches) return `<button type="button" class="linkish" data-act="inspomatch" data-id="${esc(x.id)}">Find it in my closet</button>`;
-  const wrong = wrongFor(x.id), best = ['top','outer','dress','bottom','shoes'].map(c=>((x.matches.byCat||{})[c]||[]).find(m=>!wrong.has(m.id))).filter(m=>m && m.sim>=.75).sort((a,b)=>b.sim-a.sim).slice(0,4);
-  return best.length ? `<span class="cap vm-cap">Closest in your closet</span>${matchRow(best, x.id)}` : `<span class="sub">Nothing in your closet is close.</span>`;
+// The match box in the inspiration sheet. It redraws itself as the model works, so she can see what is happening.
+function inspoMatchesInner(x){
+  const btn = label => `<button type="button" class="linkish" data-act="inspomatch" data-id="${esc(x.id)}">${label}</button>`;
+  if(V.running===x.id) return visionStatusHTML();
+  const err = V.err && V.errRef===x.id ? `<p class="caption verr">${esc(V.err)}</p>` : '';
+  if(!x.matches) return `${err}${btn(err ? 'Try again' : 'Find it in my closet')}`;
+  const wrong = wrongFor(x.id), by = x.matches.byCat || {};
+  const pick = min => ['top','outer','dress','bottom','shoes'].map(c=>(by[c]||[]).find(m=>!wrong.has(m.id) && piece(m.id))).filter(m=>m && m.sim>=min).sort((a,b)=>b.sim-a.sim).slice(0,4);
+  const strong = pick(.75), shown = strong.length ? strong : pick(0);
+  const mins = x.matches.at ? Math.max(0, Math.round((Date.now()-x.matches.at)/60000)) : null;
+  const when = mins==null ? '' : mins<1 ? ', just now' : mins<60 ? `, ${mins} min ago` : mins<1440 ? `, ${Math.round(mins/60)} h ago` : `, ${Math.round(mins/1440)} days ago`;
+  return `${err}${shown.length ? `<span class="cap vm-cap">${strong.length ? 'Closest in your closet' : 'Nothing is a strong match. Closest anyway'}</span>${matchRow(shown, x.id)}` : `<span class="sub">Nothing in your closet is close.</span>`}
+    <p class="caption">Compared with ${Object.keys(embStore().items).length} pieces${when}. ${btn('Run again')}</p>`;
+}
+const inspoMatchesHTML = x => x.preview ? `<div id="inspomatches" data-inspo="${esc(x.id)}">${inspoMatchesInner(x)}</div>` : '';
+function refreshInspoSheet(id){
+  const el = document.getElementById('inspomatches'), x = (S.style.inspo||[]).find(y=>y.id===id);
+  if(el && x && el.dataset.inspo===id && $('#sheet').classList.contains('open')) el.innerHTML = inspoMatchesInner(x);
 }
 const STYLE_PANES = [['pieces','Pieces'],['looks','Looks'],['tryons','Try-ons'],['inspo','Inspiration']];
 const labelsOf = (list, keys) => (keys||[]).map(k=>(list.find(x=>x[0]===k)||[])[1]).filter(Boolean);
@@ -1885,7 +1946,7 @@ function viewStyle(arg){
 function sheetInspo(id){
   const x = liveInspo().find(i=>i.id===id); if(!x) return;
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Inspiration</span><button type="button" class="linkish" data-close>Done</button></div>
-    <div class="stack">${x.preview?`<div class="big"><img src="${x.preview}" alt="Inspiration"></div>`:''}
+    <div class="stack instack">${x.preview?`<div class="big"><img src="${x.preview}" alt="Inspiration"></div>`:''}
     <p class="sub">${esc(labelsOf(INSPO_TAGS, x.tags).join(' · ') || 'Saved')}</p>
     ${x.note?`<p class="note">${esc(x.note)}</p>`:''}
     ${inspoMatchesHTML(x)}
@@ -1897,7 +1958,7 @@ function ownBody(){
   const own = S.ui.own;
   const res = own ? (()=>{ const w = wrongFor(own.ref), list = (own.overall||[]).filter(m=>!w.has(m.id) && piece(m.id)).slice(0,4), top = list[0];
     return `<div class="own pad"><img src="${own.preview}" alt="The piece you checked">${own.overall ? matchRow(list, own.ref, true) : ''}</div>${own.overall ? `<p class="caption pad">${top && top.sim>=.9 ? `You own something very like this: the ${esc(piece(top.id).name.toLowerCase())}.` : top && top.sim>=.84 ? 'You have something close. Worth a look before buying.' : 'Nothing very like it in your closet.'}</p>` : ''}`; })() : '';
-  return `${res}${V.busy?`<p class="caption pad busy">${esc(V.busy)}</p>`:''}
+  return `${res}${visionStatusHTML()}
     <div class="acts"><label class="btn" for="ownphoto">${own ? 'Check another photo' : 'Check a photo'}</label><input type="file" id="ownphoto" accept="image/*" class="sr"></div>`;
 }
 function sheetOwn(){
@@ -2003,7 +2064,6 @@ function viewTripForm(d){
     ${!isNew?`<div class="field"><button type="button" class="linkish" data-act="deltrip" data-id="${esc(d.id)}" style="justify-self:start">Delete this trip</button></div>`:''}
   </div>`;
 }
-const PACK_CATS = [['outer','Outerwear'],['top','Tops and knits'],['bottom','Trousers and skirts'],['dress','Dresses'],['shoes','Shoes'],['accessory','Scarves and belts'],['bag','Bags']];
 function viewTrip(id, sub){
   if(id==='new' || sub==='edit') return viewTripForm(S.ui.draft);
   const t = tripById(id);
@@ -2013,7 +2073,9 @@ function viewTrip(id, sub){
   const stops = (t.stops||[]).map(s=>`${esc(s.place||'Somewhere')}${s.from?` (${esc(shortDate(s.from))} to ${esc(shortDate(s.to||s.from))})`:''}`).join('; ');
   const unmatched = (t.stops||[]).some(s=>s.lat==null);
   const cells = ctx.map(c=>`<a href="#day/${c.date}" aria-label="${dayName(c.date)} ${nice(c.date)}"><span class="label">${dayShort(c.date)}</span><b>${c.w?(c.w.src==='typical'?'~':'')+c.w.feel+'°':'·'}</b><span class="dd">${parse(c.date).getDate()}</span></a>`).join('');
-  const groups = PACK_CATS.map(([c,l])=>{ const xs = packed.filter(p=>p.cat===c); return xs.length ? `<section class="group"><h2 class="sec">${l}</h2><ul class="picklist packlist">${xs.map(p=>`<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(why[p.id]||'')}</span></span><input type="checkbox" class="check" data-pack="${esc(p.id)}" data-trip="${esc(t.id)}" checked aria-label="Packed: ${esc(p.name)}"></label></li>`).join('')}</ul></section>` : ''; }).join('');
+  const tripTypes = CTYPES.map(([k,l,f])=>[k,l,packed.filter(f)]).filter(x=>x[2].length);
+  const groups = tripTypes.map(([k,l,xs])=>`<section class="group" data-tripsec="${k}"><h2 class="sec">${l}</h2><ul class="picklist packlist">${xs.map(p=>`<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(why[p.id]||'')}</span></span><input type="checkbox" class="check" data-pack="${esc(p.id)}" data-trip="${esc(t.id)}" checked aria-label="Packed: ${esc(p.name)}"></label></li>`).join('')}</ul></section>`).join('');
+  const tripBar = tripTypes.length>1 ? `<div class="ctypes tripbar"><div class="filters" id="tripjump" role="toolbar" aria-label="Jump to a type of clothes">${catButtons(tripTypes.map(([k,l,xs])=>[k,l,xs.length]), 'data-tripjump', S.ui.tripJump && tripTypes.some(x=>x[0]===S.ui.tripJump) ? S.ui.tripJump : tripTypes[0][0])}</div></div>` : '';
   const lookRows = ctx.map(c=>{ const st = t.stops[stopIndexFor(t,c.date)]||{}; return dayRowHTML(c.date, shortPlace(st.place)); }).join('');
   return `${masthead()}
   <header class="pagehead"><h1 class="page">${esc(tripName(t))}</h1><p class="lede">${esc(tripDates(t))}${D?`, ${D} day${D>1?'s':''}`:''}.</p><p class="caption">${stops}</p>
@@ -2027,7 +2089,7 @@ function viewTrip(id, sub){
   <div class="toggles"><label class="toggle"><span>Carry-on only<small>Two pairs of shoes at most, and one warm layer.</small></span><input type="checkbox" class="switch" id="tcarry-live" data-trip="${esc(t.id)}" ${t.carryOn?'checked':''}></label></div>
   <p class="caption pad" style="margin:14px 0 0">Add what you are already taking. Suggest fills in the rest around it, and the looks below show what the suitcase can do.</p>
   <div class="acts"><button type="button" class="btn" data-act="packadd" data-id="${esc(t.id)}">Add what I'm taking</button><button type="button" class="btn ghost" data-act="suggest" data-id="${esc(t.id)}">${(t.mine||[]).length ? 'Suggest the rest' : packed.length ? 'Suggest again' : 'Suggest a capsule'}</button></div>
-  ${packed.length?groups:`<p class="empty pad">Nothing packed yet. Add what you are taking, or tap Suggest a capsule.</p>`}</section>
+  ${packed.length?tripBar+groups:`<p class="empty pad">Nothing packed yet. Add what you are taking, or tap Suggest a capsule.</p>`}</section>
   ${packed.length&&D ? recsHTML(t) : ''}
   <section class="extras"><span class="cap">Also taking</span>
     ${(t.extras||[]).length?`<ul class="picklist extralist">${t.extras.map(x=>`<li><span class="nm">${esc(x.name)}</span><button type="button" class="linkish" data-act="rmextra" data-id="${esc(t.id)}" data-x="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">Remove</button></li>`).join('')}</ul>`:''}
@@ -2192,18 +2254,20 @@ function sheetReact(date, id){
     <p class="caption pad" style="margin:12px 0 0">Two of the same reaction become a rule the app follows. You can undo a rule from the piece.</p>
     <div class="toggles">${Object.entries(REACT).map(([k,l])=>`<label class="toggle"><span>${l}</span><input type="checkbox" class="switch" data-rtag="${k}" data-date="${date}" data-item="${esc(id||'')}" ${rs.some(r=>(r.item||null)===(id||null) && r.tag===k)?'checked':''}></label>`).join('')}</div>`);
 }
-const PACK_SHORT = {outer:'Outer', top:'Tops', bottom:'Bottoms', dress:'Dresses', shoes:'Shoes', accessory:'Extras', bag:'Bags'};
-const packTicked = (t, c) => (t.packed||[]).filter(id=>{ const x = piece(id); return x && x.cat===c; }).length;
-function packJumpHTML(t, cats){
-  const items = cats.map(([c])=>[c, PACK_SHORT[c], packTicked(t, c)]);
+const packTicked = (t, f) => (t.packed||[]).filter(id=>{ const x = piece(id); return x && f(x); }).length;
+function packJumpHTML(t, types){
+  const items = types.map(([k,l,f])=>[k, l, packTicked(t, f)]);
   const all = (t.packed||[]).filter(piece).length;
-  return catButtons(items, 'data-packjump', S.ui.packJump || cats[0][0]) + `<button type="button" class="label" data-packonly="1" aria-pressed="${!!S.ui.packOnly}">Packed<span class="n">${all}</span></button>`;
+  return catButtons(items, 'data-packjump', S.ui.packJump || types[0][0]) + `<button type="button" class="label" data-packonly="1" aria-pressed="${!!S.ui.packOnly}">Packed<span class="n">${all}</span></button>`;
 }
 // Keep the counts and the highlighted button in step while she ticks and scrolls.
 function refreshPackJump(tid){
-  const t = tripById(tid), row = $('#packjump'); if(!t || !row) return;
-  row.querySelectorAll('[data-packjump]').forEach(b=>{ const n = b.querySelector('.n'); if(n) n.textContent = packTicked(t, b.dataset.packjump); });
-  const po = row.querySelector('[data-packonly]'), n = po && po.querySelector('.n'); if(n) n.textContent = (t.packed||[]).filter(piece).length;
+  const t = tripById(tid); if(!t) return;
+  const row = $('#packjump');
+  if(row){
+    row.querySelectorAll('[data-packjump]').forEach(b=>{ const T = CTYPES.find(x=>x[0]===b.dataset.packjump), n = b.querySelector('.n'); if(T && n) n.textContent = packTicked(t, T[2]); });
+    const po = row.querySelector('[data-packonly]'), n = po && po.querySelector('.n'); if(n) n.textContent = (t.packed||[]).filter(piece).length;
+  }
 }
 function packSpy(sh){
   const row = $('#packjump'), head = sh.querySelector('.sheethead'); if(!row || !head) return;
@@ -2221,14 +2285,32 @@ function packJumpTo(cat){
   const top = sec.getBoundingClientRect().top - sh.getBoundingClientRect().top + sh.scrollTop - head.offsetHeight;
   sh.scrollTo({top: Math.max(0, top), behavior: 'smooth'});
 }
+// The trip page's own type bar: same buttons as the closet, scrolling the page to each section.
+function tripJumpTo(k){
+  const sec = document.querySelector(`[data-tripsec="${k}"]`), bar = $('.tripbar'); if(!sec) return;
+  S.ui.tripJump = k;
+  document.querySelectorAll('[data-tripjump]').forEach(b=>b.setAttribute('aria-pressed', b.dataset.tripjump===k));
+  const top = sec.getBoundingClientRect().top + window.scrollY - (bar ? bar.offsetHeight : 0) - 6;
+  window.scrollTo({top: Math.max(0, top), behavior: 'smooth'});
+}
+function tripSpy(){
+  const row = $('#tripjump'), bar = $('.tripbar'); if(!row || !bar) return;
+  const line = bar.getBoundingClientRect().bottom + 8; let cur = null;
+  document.querySelectorAll('[data-tripsec]').forEach(s=>{ if(s.getBoundingClientRect().top <= line) cur = s.dataset.tripsec; });
+  if(!cur) cur = (document.querySelector('[data-tripsec]')||{dataset:{}}).dataset.tripsec;
+  if(!cur || cur===S.ui.tripJump) return;
+  S.ui.tripJump = cur;
+  row.querySelectorAll('[data-tripjump]').forEach(b=>{ const on = b.dataset.tripjump===cur; b.setAttribute('aria-pressed', on); if(on){ const l = b.offsetLeft, w = b.offsetWidth; if(l < row.scrollLeft+12 || l+w > row.scrollLeft+row.clientWidth-12) row.scrollLeft = Math.max(0, l - 24); } });
+}
+window.addEventListener('scroll', ()=>{ if(tripSpy.q) return; tripSpy.q = requestAnimationFrame(()=>{ tripSpy.q = 0; tripSpy(); }); }, {passive:true});
 function sheetPackAdd(tid){
   const t = tripById(tid); if(!t) return;
   const have = new Set(t.packed||[]);
-  const cats = PACK_CATS.filter(([c])=>closet().some(p=>p.cat===c && usable(p, true)));
-  S.ui.packJump = cats[0] && cats[0][0]; S.ui.packOnly = false;
-  const groups = cats.map(([c,l])=>{ const xs = closet().filter(p=>p.cat===c && usable(p, true)); return `<section class="group" data-packsec="${c}"><h2 class="sec">${l}</h2><ul class="picklist packlist">${xs.map(p=>`<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(p.colour||'')}</span></span><input type="checkbox" class="check" data-pack="${esc(p.id)}" data-trip="${esc(tid)}" ${have.has(p.id)?'checked':''} aria-label="${esc(p.name)}"></label></li>`).join('')}</ul></section>`; }).join('');
+  const types = CTYPES.filter(([k,l,f])=>closet().some(p=>f(p) && usable(p, true)));
+  S.ui.packJump = types[0] && types[0][0]; S.ui.packOnly = false;
+  const groups = types.map(([k,l,f])=>{ const xs = closet().filter(p=>f(p) && usable(p, true)); return `<section class="group" data-packsec="${k}"><h2 class="sec">${l}</h2><ul class="picklist packlist">${xs.map(p=>`<li><label><span class="th">${art(p)}</span><span><span class="nm">${esc(p.name)}</span><span class="sub">${esc(p.colour||'')}</span></span><input type="checkbox" class="check" data-pack="${esc(p.id)}" data-trip="${esc(tid)}" ${have.has(p.id)?'checked':''} aria-label="${esc(p.name)}"></label></li>`).join('')}</ul></section>`; }).join('');
   openSheet(`<div class="sheethead"><div class="bar"><span class="cap" id="sheetTitle">What I'm taking</span><button type="button" class="linkish" data-close>Done</button></div>
-    <div class="filters" id="packjump" role="toolbar" aria-label="Jump to a category">${packJumpHTML(t, cats)}</div></div>
+    <div class="filters" id="packjump" role="toolbar" aria-label="Jump to a type of clothes">${packJumpHTML(t, types)}</div></div>
     <p class="caption pad" style="margin:12px 0 0">Tick everything you are already taking. Suggest the rest fills in around it.</p>${groups}`);
   const sh = $('#sheet'); sh.classList.remove('packonly'); sh.onscroll = () => packSpy(sh);
 }
@@ -2508,6 +2590,7 @@ document.addEventListener('click', async e=>{
     sh.querySelectorAll('[data-ptab]').forEach(b=>b.setAttribute('aria-pressed', b===t));
     sh.querySelectorAll('.ppane').forEach(el=>{ el.hidden = el.dataset.pane!==k; }); return; }
   if(t.dataset.packjump){ packJumpTo(t.dataset.packjump); return; }
+  if(t.dataset.tripjump){ tripJumpTo(t.dataset.tripjump); return; }
   if(t.dataset.packonly){ S.ui.packOnly = !S.ui.packOnly; $('#sheet').classList.toggle('packonly', S.ui.packOnly); t.setAttribute('aria-pressed', S.ui.packOnly); if(S.ui.packOnly) $('#sheet').scrollTo({top:0}); return; }
   if(t.dataset.stylepane){ S.ui.stylePane = t.dataset.stylepane; render(); return; }
   if(t.dataset.inspoopen){ sheetInspo(t.dataset.inspoopen); return; }
@@ -2710,7 +2793,7 @@ document.addEventListener('change', async e=>{
     const f = el.files[0], ph = await readPhoto(f); if(!ph){ toast("That photo couldn't be read."); return; }
     const vid = 'v-'+Date.now().toString(36); S.ui.own = {preview: ph.preview, ref: vid}; render();
     try{ const r = await matchPicture(f, vid); S.ui.own.overall = r.overall; logVision({id:vid, at:Date.now(), kind:'own', overall:r.overall, byCat:r.byCat}); }
-    catch(err){ V.busy = ''; toast(err.message || 'The vision model failed.'); }
+    catch(err){ visionSay(''); toast(err.message || 'The vision model failed.'); }
     render(); return;
   }
   if((el.id==='lookphoto' || el.id==='inspophoto') && el.files[0]){

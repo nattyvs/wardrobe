@@ -234,14 +234,16 @@ button.tag{cursor:pointer}
 .sgrid .ph.flat span{display:grid;place-items:center;min-height:0}
 .sgrid .ph.flat img,.sgrid .ph.flat svg{max-width:100%;max-height:100%}
 .sgrid .in-link{display:grid;place-items:center;height:100%;font:400 18px/1 var(--didot);color:var(--ink-2)}
-.sgrid .pstrip{display:flex;gap:3px;flex-wrap:wrap}
-.sgrid .pstrip span{width:26px;height:26px;display:grid;place-items:center}
-.sgrid .pstrip img,.sgrid .pstrip svg{max-width:100%;max-height:100%}
+.sgrid .pstrip{display:grid;grid-template-columns:repeat(auto-fill,26px);gap:6px 4px;align-content:start}
+.sgrid .pstrip>span{width:26px;height:26px;display:grid;place-items:center;overflow:hidden;min-width:0;min-height:0}
+.sgrid .pstrip img,.sgrid .pstrip svg{display:block;width:100%;height:100%;object-fit:contain}
+.sgrid li>.sub{margin-top:2px}
+.sgrid li>.pstrip+.sub{margin-top:4px}
 .sgrid .sub{font:500 9.5px/1.4 var(--jost);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2)}
 .sgrid .note{font-size:13px;line-height:1.4}
-.sgrid .linkish{justify-self:start}
+.sgrid .linkish{justify-self:start;padding-top:2px}
 .sgrid .badge{position:absolute;left:6px;top:6px;background:var(--panel);font:500 9px/1 var(--jost);letter-spacing:.14em;text-transform:uppercase;padding:4px 6px}
-.sgrid .deciders{display:flex;gap:14px}
+.sgrid .deciders{display:flex;gap:6px 14px;flex-wrap:wrap}
 .pagehead .toprow{grid-column:2;grid-row:1 / span 2;align-self:start;display:flex;align-items:center;gap:4px;margin-top:-8px}
 .pagehead .toprow .toplink{margin-top:0;padding-left:10px;grid-column:auto;grid-row:auto}
 .ownbtn{display:grid;place-items:center;width:44px;height:44px;background:none;border:0;color:var(--ink)}
@@ -276,6 +278,11 @@ button.tag{cursor:pointer}
 .field textarea{resize:none;min-height:44px}
 .field .hint{font-size:12px;color:var(--ink-2)}
 .stack{display:grid;gap:22px;padding-top:18px}
+.instack>.sub,.instack>.note,.instack>#inspomatches{padding-left:var(--gutter);padding-right:var(--gutter-r)}
+.instack #inspomatches{display:grid;gap:10px;justify-items:start}
+.instack #inspomatches .vstat{padding:0;width:100%;margin:0}
+.instack #inspomatches .vm-cap{margin:0}
+.instack #inspomatches p{margin:0}
 .history{list-style:none;margin:0;padding:0 var(--gutter-r) 0 var(--gutter)}
 .history li{display:grid;grid-template-columns:76px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--rule-soft);align-items:center}
 .history .dt{font:400 16px/1.1 var(--didot)}
@@ -468,7 +475,7 @@ h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
 .heropic{position:relative;margin:2px 0 0;height:calc(clamp(340px,95vw,410px) + 98px);background:var(--paper);display:flex;flex-direction:column;align-items:center;padding:34px var(--gutter) 0}
 .heropic .label{position:absolute;left:var(--gutter);top:10px}
 .heropic .deciders{display:flex;gap:22px;justify-content:center;margin:2px 0 6px}
-.tryons .deciders{display:flex;gap:14px}
+.tryons .deciders{display:flex;gap:6px 14px;flex-wrap:wrap}
 .heropic .rmpic{position:absolute;right:var(--gutter-r);top:8px}
 .heropic img{flex:1;min-height:0;max-width:100%;object-fit:contain}
 .heropic .caption{margin:6px 0 4px;text-align:center}
@@ -527,6 +534,14 @@ h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
 .cd-body .segs .n{margin-left:6px;font:400 12px/1 var(--didot);letter-spacing:0;color:var(--ink-2)}
 .ctypes{position:sticky;top:0;z-index:6;background:var(--paper);display:flex;align-items:center;border-bottom:1px solid var(--rule-soft);margin-top:10px}
 .ctypes .filters{padding:12px var(--gutter-r) 8px 12px;flex:1;min-width:0}
+.tripbar{margin-top:18px}
+.tripbar .filters{padding-left:var(--gutter)}
+.tripbar+.group{margin-top:0}
+.vstat{display:grid;gap:8px;margin:12px 0 0}
+.vstat[hidden]{display:none}
+.vbar{display:block;height:2px;background:var(--rule-soft);overflow:hidden}
+.vbar b{display:block;height:100%;background:var(--ink);transition:width .25s var(--ease)}
+.verr{color:var(--pink)}
 .cfilter{flex:0 0 auto;margin-left:var(--gutter);position:relative;display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--rule);background:none;color:var(--ink);cursor:pointer}
 .cfilter b{position:absolute;top:-7px;right:-7px;min-width:16px;height:16px;border-radius:8px;background:var(--wine);color:var(--paper);font:500 10px/16px var(--jost);text-align:center;padding:0 3px}
 .cscrim{position:fixed;inset:0;background:rgba(20,18,16,.32);opacity:0;pointer-events:none;transition:opacity .25s var(--ease);z-index:30}
