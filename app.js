@@ -461,7 +461,7 @@ function buildOne(date, opts){
     // Freshness. On a trip the suitcase is meant to be worn again and again, and a coat can be worn all week:
     // only avoid the same piece two days running.
     if(opts.scope){ const n = (opts.uses && opts.uses[p.id]) || 0, light = slot==='outer' || slot==='shoes';
-      if(!light && ago<1.5) s -= 2.5; s += Math.min(ago, 6)/12 - n*(light ? .15 : .55); }
+      if(!light && ago<1.5) s -= 2.5; s += Math.min(ago, 6)/12 - n*(light ? .15 : opts.fresh ? 1.6 : .55); } // no laundry: a clean top for each day, so a piece already worn on the trip counts against it more
     else if(slot==='outer'){ s += Math.min(ago, 120)/240; }
     else {
       s += ago===999 ? 2.6 : Math.min(ago, 120)/40;
@@ -941,7 +941,7 @@ function planLooks(t, ids){
   tripDays(t).forEach(date=>{
     const logged = log().find(e=>e.date===date && e.source!=='sample' && e.items && e.items.length);
     if(logged){ logged.items.forEach(id=>markPlanned(planned, id, date)); return; }
-    const res = applySwaps(buildOutfit(date, {scope, planned, uses}), date);
+    const res = applySwaps(buildOutfit(date, {scope, planned, uses, fresh:t.laundry===false}), date);
     res.list.forEach(({p})=>{ markPlanned(planned, p.id, date); sidesOf(p.id).forEach(x=>{ uses[x] = (uses[x]||0)+1; }); });
     looks[date] = res;
   });
@@ -960,6 +960,9 @@ function packTrip(t){
   const ctx = tripContext(t), D = ctx.length;
   if(!D) return [];
   const acts = new Set(t.activities||[]), carryOn = !!t.carryOn;
+  const laundry = t.laundry !== false; // yes: about one wash a week, so the capsule stays small. No: the clothes scale with the days.
+  const hotDays = ctx.filter(c=>c.w && c.w.max!=null && c.w.max >= 23).length; // 23° is the sandal line in the style checks
+  const lean = acts.has('beach') || hotDays >= 3; // beach or a hot trip: dresses and a pair of sandals
   const known = ctx.filter(c=>c.t!=null);
   const needOf = c => c.t!=null ? band(c.t) : 3; // days without weather are planned as mild; the screen says so
   const R = rules(), st = stats();
@@ -1004,12 +1007,17 @@ function packTrip(t){
     }
     return out;
   }
-  const nDress = days.some(d=>d.need<=3) ? clamp(Math.round(D/4), 0, 3) : 0;
+  // About two tops to every bottom (common capsule practice: every top goes with every bottom). Her own picks are never capped:
+  // choose() keeps them on top of these counts.
+  const mild = days.some(d=>d.need<=3);
+  const nDress = !mild ? 0 : lean ? clamp(Math.round(D/3), 1, D>=10 ? 4 : 3) + (laundry ? 0 : (D>=14 ? 1 : 0)) : clamp(Math.round(D/4), 0, 3);
   const sep = Math.max(1, D - nDress);
+  const nBottom = laundry ? clamp(Math.round(sep/3), D>=4 ? 2 : 1, 4) : clamp(Math.ceil(sep/3)+1, D>=4 ? 2 : 1, 5);
+  const nTop = laundry ? clamp(Math.ceil(sep*2/3), 2, 6) : clamp(sep, 2, 10);
   let bottomsIn = [];
-  const bottoms = choose('bottom', clamp(Math.floor(sep/2), 1, 4), null, p=>NEUTRAL.test(p.colour||'') && !patterned(p) ? 1 : 0);
+  const bottoms = choose('bottom', nBottom, null, p=>NEUTRAL.test(p.colour||'') && !patterned(p) ? 1 : 0);
   bottomsIn = bottoms;
-  const tops = choose('top', clamp(Math.ceil(sep/2), 1, 6), null, p=>bottoms.length ? (bottoms.filter(b=>compatible(p,b)).length/bottoms.length)*2 - 1.2 : 0);
+  const tops = choose('top', nTop, null, p=>bottoms.length ? (bottoms.filter(b=>compatible(p,b)).length/bottoms.length)*2 - 1.2 : 0);
   const dresses = nDress ? choose('dress', nDress) : [];
   const minT = known.length ? Math.min(...known.map(c=>c.tmin!=null ? c.tmin : c.t)) : null;
   const eveNeed = minT!=null ? band(minT) : Math.max(...days.map(d=>d.need));
@@ -1029,6 +1037,14 @@ function packTrip(t){
     if(layer) keep.add(layer.id);
   }
   const shoes = choose('shoes', D<=2 ? 1 : (carryOn || D<8 ? 2 : 3));
+  // A hot or beach trip with dresses, skirts or shorts going gets one pair of sandals, if the checks let a look use them on some day.
+  const skirtish = dresses.length || bottoms.some(b=>b.shape==='skirt' || /shorts/i.test(b.name||''));
+  if(lean && skirtish && D>2 && !shoes.some(p=>p.shape==='sandal')){
+    const sand = pool.filter(p=>p.shape==='sandal' && slotOf(p)==='shoes' && ctx.some(c=>pieceAllowed(p, {date:c.date, high:c.w && c.w.max!=null ? c.w.max : null})))
+      .sort((a,b)=>base(b,'shoes')-base(a,'shoes'))[0];
+    const drop = shoes.slice().reverse().find(p=>!mineSet.has(p.id));
+    if(sand && (drop || shoes.length < (carryOn || D<8 ? 2 : 3))){ if(drop) shoes.splice(shoes.indexOf(drop), 1); shoes.push(sand); }
+  }
   const scarf = eveNeed>=3 ? choose('accessory', 1, p=>p.shape==='scarf' && !/headband/i.test(p.name||'')) : [];
   const belts = pool.filter(p=>slotOf(p)==='belt'), beltsIn = [];
   const medianNeed = days.map(d=>d.need).sort((a,b)=>a-b)[Math.floor(days.length/2)];
@@ -1042,9 +1058,11 @@ function packTrip(t){
       const bs = next.map(piece).filter(p=>p && p.cat==='bottom' && !mineSet.has(p.id)).sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
       if(bs.length>1 && (use[bs[0].id]||0)<2) next = next.filter(id=>id!==bs[0].id);
     }
-    if(D>=6 && next.length===ids.length){
+    // Tops and dresses worn once are only dropped while there are more than two tops to each bottom (the 2:1 target), and not at all without laundry.
+    const nTops = next.map(piece).filter(p=>p && p.cat==='top').length, nBots = next.map(piece).filter(p=>p && p.cat==='bottom').length;
+    if(laundry && D>=6 && next.length===ids.length){
       const tp = next.map(piece).filter(p=>p && (p.cat==='top' || p.cat==='dress') && !mineSet.has(p.id)).sort((a,b)=>(use[a.id]||0)-(use[b.id]||0));
-      if(tp.length>2 && (use[tp[0].id]||0)<2) next = next.filter(id=>id!==tp[0].id);
+      if(tp.length>2 && (use[tp[0].id]||0)<2 && (tp[0].cat==='dress' || nTops > 2*nBots)) next = next.filter(id=>id!==tp[0].id);
     }
     if(next.length===ids.length) break;
     ids = next;
@@ -2145,8 +2163,8 @@ function toggleLove(id){
 
 /* ---------------- trips: screens ---------------- */
 function newDraft(t){
-  if(t) return JSON.parse(JSON.stringify(Object.assign({activities:[], packed:[], carryOn:false}, t)));
-  return {id:'trip-'+Date.now().toString(36), name:'', stops:[{place:'', from:'', to:'', lat:null, lon:null}], activities:[], packed:[], carryOn:false, isNew:true};
+  if(t) return JSON.parse(JSON.stringify(Object.assign({activities:[], packed:[], carryOn:false, laundry:true}, t)));
+  return {id:'trip-'+Date.now().toString(36), name:'', stops:[{place:'', from:'', to:'', lat:null, lon:null}], activities:[], packed:[], carryOn:false, laundry:true, isNew:true};
 }
 function viewTrips(){
   const ts = liveTrips().slice().sort((a,b)=>((tripSpan(b)||{}).from||'').localeCompare((tripSpan(a)||{}).from||''));
@@ -2173,7 +2191,8 @@ function viewTripForm(d){
     <div class="field"><button type="button" class="linkish" data-act="addstop" style="justify-self:start">Add another stop</button></div>
     <div class="field"><span class="cap">What the days involve</span></div>
     <div class="toggles">${TRIP_ACTS.map(([k,l])=>`<label class="toggle"><span>${l}</span><input type="checkbox" class="switch" data-tact="${k}" ${d.activities.includes(k)?'checked':''}></label>`).join('')}
-    <label class="toggle"><span>Carry-on only<small>Keeps shoes and layers to a minimum.</small></span><input type="checkbox" class="switch" id="tcarry" ${d.carryOn?'checked':''}></label></div>
+    <label class="toggle"><span>Carry-on only<small>Keeps shoes and layers to a minimum.</small></span><input type="checkbox" class="switch" id="tcarry" ${d.carryOn?'checked':''}></label>
+    <label class="toggle"><span>Laundry on the trip<small>About one wash a week. Off packs clothes for each day.</small></span><input type="checkbox" class="switch" id="tlaundry" ${d.laundry!==false?'checked':''}></label></div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savetrip">Save trip</button><a class="btn ghost" href="${isNew?'#trips':'#trip/'+esc(d.id)}">Cancel</a></div>
     ${!isNew?`<div class="field"><button type="button" class="linkish" data-act="deltrip" data-id="${esc(d.id)}" style="justify-self:start">Delete this trip</button></div>`:''}
   </div>`;
@@ -2200,7 +2219,8 @@ function viewTrip(id, sub){
   ${gp.notes.map(n=>`<p class="caption">${esc(n)}</p>`).join('')}</section>
   ${gp.gaps.length?`<section class="gaps"><span class="label">Before you fly</span><ul>${gp.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></section>`:''}
   <section class="packing"><span class="cap">In the suitcase${packed.length?` · ${packed.length}`:''}</span>
-  <div class="toggles"><label class="toggle"><span>Carry-on only<small>Two pairs of shoes at most, and one warm layer.</small></span><input type="checkbox" class="switch" id="tcarry-live" data-trip="${esc(t.id)}" ${t.carryOn?'checked':''}></label></div>
+  <div class="toggles"><label class="toggle"><span>Carry-on only<small>Two pairs of shoes at most, and one warm layer.</small></span><input type="checkbox" class="switch" id="tcarry-live" data-trip="${esc(t.id)}" ${t.carryOn?'checked':''}></label>
+  <label class="toggle"><span>Laundry on the trip<small>About one wash a week. Off packs clothes for each day.</small></span><input type="checkbox" class="switch" id="tlaundry-live" data-trip="${esc(t.id)}" ${t.laundry!==false?'checked':''}></label></div>
   <p class="caption pad" style="margin:14px 0 0">Add what you are already taking. Suggest fills in the rest around it, and the looks below show what the suitcase can do.</p>
   <div class="acts"><button type="button" class="btn" data-act="packadd" data-id="${esc(t.id)}">Add what I'm taking</button><button type="button" class="btn ghost" data-act="suggest" data-id="${esc(t.id)}">${(t.mine||[]).length ? 'Suggest the rest' : packed.length ? 'Suggest again' : 'Suggest a capsule'}</button></div>
   ${packed.length?tripBar+groups:`<p class="empty pad">Nothing packed yet. Add what you are taking, or tap Suggest a capsule.</p>`}</section>
@@ -2923,6 +2943,8 @@ document.addEventListener('change', async e=>{
   if(el.dataset.rtag){ toggleReaction(el.dataset.date, el.dataset.item || null, el.dataset.rtag, el.checked); return; }
   if(el.dataset.tact && S.ui.draft){ const a = S.ui.draft.activities, k = el.dataset.tact; S.ui.draft.activities = el.checked ? [...new Set([...a, k])] : a.filter(x=>x!==k); return; }
   if(el.id==='tcarry' && S.ui.draft){ S.ui.draft.carryOn = el.checked; return; }
+  if(el.id==='tlaundry' && S.ui.draft){ S.ui.draft.laundry = el.checked; return; }
+  if(el.id==='tlaundry-live'){ const tr = tripById(el.dataset.trip); if(tr){ tr.laundry = el.checked; tr.updated = Date.now(); queuePush({trips:true}); render(); toast(el.checked ? 'Laundry on the trip. Suggest again to apply it.' : 'No laundry. Suggest again to apply it.'); } return; }
   if(el.id==='tcarry-live'){ const tr = tripById(el.dataset.trip); if(tr){ tr.carryOn = el.checked; tr.updated = Date.now(); queuePush({trips:true}); render(); toast(el.checked ? 'Carry-on only. Suggest again to apply it.' : 'Checked bag. Suggest again to apply it.'); } return; }
   if(el.id==='prepeat'){ toggleRepeat(el.dataset.id); const n = $('#repnote'), rep = onRepeatSince(el.dataset.id); if(n) n.textContent = rep ? `Since ${shortDate(rep)}. Fades after ${ON_REPEAT_DAYS} days.` : 'Wearing this a lot lately. No need to log each day.'; return; }
   if(el.id==='photo' && el.files[0]){
