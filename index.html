@@ -58,7 +58,8 @@ h2.sec{font:400 15px/1.2 var(--didot);letter-spacing:.2em;text-transform:upperca
 .mast button{background:none;border:0;padding:6px 0 6px 12px;display:flex;gap:6px;align-items:center}
 .mast button .label{border-bottom:1px solid var(--ink);padding-bottom:2px}
 .sample-note{margin:10px var(--gutter-r) 0 var(--gutter);padding:8px 0;border-top:1px solid var(--rule-soft);border-bottom:1px solid var(--rule-soft);display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:12px;color:var(--ink-2)}
-.sample-note a{color:var(--ink);text-underline-offset:3px;white-space:nowrap}
+.sample-note a{color:var(--ink);text-underline-offset:3px;white-space:nowrap;display:inline-flex;align-items:center;min-height:44px;margin:-12px 0}
+.connline{margin:0;font-size:15px;color:var(--ink)}
 
 /* ---------- today hero ---------- */
 .hero{position:relative;height:calc(clamp(340px,95vw,410px) + 98px);overflow:hidden;margin-top:2px}
@@ -98,6 +99,13 @@ h2.sec{font:400 15px/1.2 var(--didot);letter-spacing:.2em;text-transform:upperca
 .tag.customer{background:var(--pink);border-color:var(--pink);color:var(--on-pink)}
 .tag.off{border-color:var(--rule-soft);color:var(--ink-2)}
 button.tag{cursor:pointer}
+.occ .tag{position:relative}
+.occ .tag::after{content:'';position:absolute;inset:-12px -8px}
+.occopts{display:grid;gap:8px;padding:16px var(--gutter-r) 6px var(--gutter)}
+.occopts button{display:flex;justify-content:space-between;align-items:center;min-height:44px;padding:10px 12px;border:1px solid var(--ink-2);background:transparent;color:var(--ink);text-align:left;letter-spacing:.1em}
+.occopts button[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.occopts .now{font-size:10px;letter-spacing:.18em;opacity:.85}
+.occnote{padding-top:12px;padding-bottom:22px}
 .why{margin:0;font:400 19px/1.25 var(--didot);text-wrap:pretty}
 .credit-line{margin:0;display:grid;grid-template-columns:1fr;gap:2px;font:300 12.5px/1.45 var(--jost);color:var(--ink-2)}
 .credit-line span{min-width:0}

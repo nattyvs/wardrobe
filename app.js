@@ -12,6 +12,7 @@ const CITIES = {London:{lat:51.5072,lon:-0.1276,tz:'Europe/London'}, Paris:{lat:
 const settings = Object.assign({token:'', repo:'nattyvs/wardrobe-private', city:'London', sample:true}, LS.get('wd.settings', {}));
 const ON_REPEAT_DAYS = 28; // how long an "on repeat" tap lasts before it fades. One number to change.
 const cache = LS.get('wd.cache', {});
+const isSampleId = id => /^s-/.test(String(id));
 const S = {
   closet: cache.closet || null,
   log: cache.log || null,
@@ -25,10 +26,13 @@ const S = {
   weather: LS.get('wd.weather', null),
   sha: cache.sha || {},
   synced: cache.synced || null,
+  // real = her own data has been pulled from GitHub at least once. Only then is the screen "her wardrobe". Older caches are judged by their pieces.
+  real: cache.real!==undefined ? !!cache.real : (!settings.sample && !!(cache.closet && cache.closet.length && !cache.closet.some(p=>isSampleId(p.id)))),
+  connErr: LS.get('wd.connerr', null),
   photos: {},
   ui: {memo:{}, rules:null, more:{}, chips:{}}
 };
-function persist(){ S.ui.memo = {}; S.ui.rules = null; LS.set('wd.cache', {closet:S.closet, log:S.log, plan:S.plan, state:S.state, trips:S.trips, palette:S.palette, style:S.style, vision:S.vision, sha:S.sha, synced:S.synced}); }
+function persist(){ S.ui.memo = {}; S.ui.rules = null; LS.set('wd.cache', {closet:S.closet, log:S.log, plan:S.plan, state:S.state, trips:S.trips, palette:S.palette, style:S.style, vision:S.vision, sha:S.sha, synced:S.synced, real:S.real}); }
 function saveSettings(){ LS.set('wd.settings', settings); }
 
 /* ---------------- dates ---------------- */
@@ -43,6 +47,7 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 const shortDate = s => { const d = parse(s); return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)}`; };
 const dayName = s => DAYS[parse(s).getDay()];
 const dayShort = s => DSHORT[parse(s).getDay()];
+const longDate = s => { const d = parse(s); return `${DSHORT[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)} ${d.getFullYear()}`; };
 const nice = s => { const d = parse(s); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 const monday = s => { const d = parse(s); const k = (d.getDay()+6)%7; d.setDate(d.getDate()-k); return iso(d); };
 const weekOf = s => { const m = monday(s); return Array.from({length:7}, (_,i)=>addDays(m,i)); };
@@ -97,6 +102,23 @@ function ensureSample(){
   }
 }
 
+/* Nothing from the sample may ever reach her private repo. These drop every record that mentions a sample piece. */
+const sampleKey = k => /(^|[:|,])s-/.test(k);
+const mentionsSample = v => /"s-[\w-]+"/.test(JSON.stringify(v==null?null:v));
+function scrubSample(){
+  const clean = o => { Object.keys(o||{}).forEach(k=>{ if(sampleKey(k) || mentionsSample(o[k])) delete o[k]; }); };
+  ['edits','onRepeat','ruleOff','dormant','wearSoon','swaps'].forEach(k=>clean(S.state[k]));
+  S.log = (S.log||[]).filter(e=>e.source!=='sample' && !mentionsSample(e.items));
+  clean(S.style.loves);
+  ['looks','tryons','inspo'].forEach(k=>{ if(S.style[k]) S.style[k] = S.style[k].filter(x=>!mentionsSample(x)); });
+  if(S.vision){ S.vision.entries = (S.vision.entries||[]).filter(x=>!mentionsSample(x)); S.vision.feedback = (S.vision.feedback||[]).filter(x=>!mentionsSample(x)); clean(S.vision.corrections); }
+  (S.trips||[]).forEach(t=>{ if(t.packed) t.packed = t.packed.filter(id=>!isSampleId(id)); });
+}
+// Leaving the sample: forget everything made while it showed, including anything waiting to be sent.
+function dropSample(){
+  S.closet = []; S.state.dayOcc = {}; S.state.sampleSeeded = null; S.real = false; scrubSample();
+  LS.set('wd.pending', {}); queuePush.what = {}; persist();
+}
 /* ---------------- trips: spans and lookups ---------------- */
 const TRIP_ACTS = [['work','Work'],['family','Family'],['beach','Beach'],['evenings','Evenings out'],['sightseeing','Sightseeing']];
 function tripSpan(t){
@@ -1220,10 +1242,21 @@ function b64dec(b64){ const bin = atob(b64.replace(/\s/g,'')); const bytes = new
 const ghReady = () => !!(settings.token && settings.repo && !settings.sample);
 function ghURL(path){ const [o,r] = settings.repo.split('/'); return `https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/contents/${path}`; }
 const ghHeaders = extra => Object.assign({Authorization:'Bearer '+settings.token, Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28'}, extra||{});
+/* Why a connection failed, in plain words. Kept until the next pull works, and shown in the masthead and in Settings. */
+function connReason(status){
+  if(status===401 || status===403) return 'GitHub refused the token.';
+  if(status===404) return "Couldn't find that repository.";
+  if(status===429) return 'GitHub is limiting requests. Try again in a minute.';
+  if(!status) return 'Offline.';
+  return `GitHub had a problem (${status}).`;
+}
+const connLine = () => S.connErr ? S.connErr + (S.real ? " Showing what's kept on this phone." : '') : '';
+function connError(status){ const e = new Error(''); e.status = status; e.reason = connReason(status); e.message = e.reason; return e; }
+function setConnErr(msg){ S.connErr = msg || null; LS.set('wd.connerr', S.connErr); }
 async function ghGet(path){
-  const r = await fetch(ghURL(path), {cache:'no-store', headers:ghHeaders()});
+  const r = await fetch(ghURL(path), {cache:'no-store', headers:ghHeaders()}).catch(()=>{ throw connError(0); });
   if(r.status===404) return {sha:null, data:null};
-  if(!r.ok) throw new Error(r.status===401 ? 'The token was refused. Check it in Settings.' : `GitHub said ${r.status} for ${path}.`);
+  if(!r.ok) throw connError(r.status);
   const j = await r.json(); return {sha:j.sha, data:JSON.parse(b64dec(j.content||'')||'null')};
 }
 const sleep = ms => new Promise(r=>setTimeout(r, ms));
@@ -1289,9 +1322,19 @@ const b64Blob = async b64 => { const bin = atob(b64.replace(/\s/g,'')), a = new 
 loadPhoto.busy = {};
 async function pull(){
   if(!ghReady()) return;
+  try{ await pullAll(); setConnErr(null); }
+  catch(e){ setConnErr(e.reason || "Couldn't read the data from GitHub."); e.message = connLine(); throw e; }
+}
+async function pullAll(){
+  scrubSample();
   const files = {closet:'data/closet.json', log:'data/wearlog.json', plan:'data/plan.json', state:'data/state.json', trips:'data/trips.json', palette:'data/palette.json', style:'data/style.json', vision:'data/vision.json'};
   const out = {};
   for(const [k,p] of Object.entries(files)){ const r = await ghGet(p); S.sha[p] = r.sha; out[k] = r.data; }
+  // A missing file reads as empty, so a wrong repo name looks like a new empty one. Ask the repo itself.
+  if(Object.keys(files).every(k=>!out[k])){
+    const [o,r] = settings.repo.split('/'), res = await fetch(`https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r||'')}`, {cache:'no-store', headers:ghHeaders()}).catch(()=>{ throw connError(0); });
+    if(!res.ok) throw connError(res.status);
+  }
   if(out.closet && out.closet.pieces) S.closet = out.closet.pieces.map(p=>Object.assign({}, p, S.state.edits[p.id]||{}));
   if(out.log && out.log.entries){
     const byDate = {}; out.log.entries.forEach(e=>byDate[e.date]=e);
@@ -1322,7 +1365,7 @@ async function pull(){
     S.style.rules = out.style.rules || S.style.rules || [];
     S.style.checks = out.style.checks || S.style.checks || []; // Claude's too: always what is on GitHub
   }
-  S.synced = Date.now(); persist();
+  S.synced = Date.now(); S.real = true; persist();
 }
 // Fetch the closet from GitHub, apply only our pending patches, write with that sha. If GitHub refuses (someone else
 // committed in between), fetch again and re-apply, rather than resending an old copy.
@@ -1351,6 +1394,7 @@ let pushTimer = null, pushChain = Promise.resolve(), pushFails = 0;
 function editPiece(id, patch){ S.state.edits[id] = Object.assign({}, S.state.edits[id], patch); }
 function queuePush(what){
   persist();
+  if(settings.sample) return; // sample edits stay on this phone and are never queued for GitHub
   LS.set('wd.pending', Object.assign(LS.get('wd.pending', {}), what));
   if(!ghReady()) return;
   queuePush.what = Object.assign(queuePush.what||{}, what);
@@ -1360,8 +1404,11 @@ function queuePush(what){
 // One push at a time: a second one starting while the first is still running is what made GitHub answer 409.
 function schedulePush(){ if(!navigator.onLine){ updateNet(); return; } pushChain = pushChain.then(runPush).catch(()=>{}); }
 async function runPush(){
-  const w = queuePush.what || {}; queuePush.what = {};
+  if(settings.sample) { queuePush.what = {}; return; }
+  const w = queuePush.what || {};
   if(!Object.keys(w).length) return;
+  if(!S.real) return; // never write over her files before her own copy has been read once
+  queuePush.what = {}; scrubSample();
   LS.set('wd.pending', {}); // put back below if the push fails
   try{
     if(w.log) await ghPut('data/wearlog.json', {entries:S.log.filter(e=>e.source!=='sample')}, 'Log what I wore');
@@ -1446,7 +1493,17 @@ function filterRow(key, opts, dflt){
 }
 function masthead(back){
   return `<header class="mast">${back ? `<a class="back" href="${back.href}" aria-label="Back to ${esc(back.label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span class="label">${esc(back.label)}</span></a>` : '<span class="word">Wardrobe</span>'}<button type="button" data-act="city" aria-label="Switch city, now ${esc(settings.city)}"><span class="label">${esc(settings.city)}</span></button></header>
-  ${settings.sample || (S.weather&&S.weather.sample) ? `<p class="sample-note">${settings.sample?'Sample wardrobe':'Your wardrobe'}${S.weather&&S.weather.sample?' and sample forecast':''}.${settings.sample?` <a href="#log/settings">Connect yours</a>`:''}</p>` : ''}`;
+  ${connNote()}`;
+}
+/* The strip under the masthead says what the screen is: the sample, nothing yet, her own data, or her own data that could not be refreshed. */
+function connNote(){
+  const fc = S.weather&&S.weather.sample ? ' and sample forecast' : '';
+  let text = '', link = '';
+  if(settings.sample){ text = `Sample wardrobe${fc}.`; link = 'Connect yours'; }
+  else if(!S.real){ text = 'Not connected yet.' + (S.connErr ? ' ' + S.connErr : ''); link = S.connErr ? 'Fix in Settings' : 'Connect yours'; }
+  else if(S.connErr){ text = connLine(); link = 'Settings'; }
+  else if(fc) text = `Your wardrobe${fc}.`;
+  return text ? `<p class="sample-note" role="status"><span>${esc(text)}</span>${link ? `<a href="#log/settings">${link}</a>` : ''}</p>` : '';
 }
 // where each kind of piece sits on the spread, in % of the hero
 const LAYOUT = {
@@ -1506,7 +1563,7 @@ function viewDay(date, settle){
   </div>${dots}
   <div class="credits">
     ${tripLine}
-    <div class="occ"><button type="button" class="tag ${tagCls}" data-act="occ" data-date="${date}" aria-label="Occasion: ${OCC[occ.occ]}. Tap to change.">${OCC[occ.occ]}</button>${occ.note?`<span class="label">${esc(occ.note)}</span>`:''}</div>
+    <div class="occ"><button type="button" class="tag ${tagCls}" data-act="occ" data-date="${date}" aria-label="Occasion: ${OCC[occ.occ]}. Choose another.">${OCC[occ.occ]}</button>${occ.occ==='customer' && occ.note?`<span class="label">${esc(occ.note)}</span>`:''}</div>
     <p class="why">${esc(whyLine(o, date))}</p>
     ${fnote?`<p class="caption facenote">${esc(fnote)}</p>`:''}
     ${o.adjusted?`<p class="adjusted">${esc(o.adjusted)}</p>`:''}
@@ -1833,6 +1890,7 @@ function viewSettings(){
   return `${masthead()}
   <header class="pagehead"><h1 class="page">Settings</h1><p class="lede">Your closet, log and Claude's weekly plan live in a private GitHub repo.</p></header>
   <div class="stack">
+    <div class="field"><span class="cap">Connection</span><p class="connline" role="status">${esc(settings.sample ? 'Showing the sample wardrobe.' : !S.real ? 'Not connected yet.' + (S.connErr ? ' ' + S.connErr : '') : S.connErr ? connLine() : 'Connected.')}</p></div>
     <div class="field"><label class="cap" for="repo">Data repo</label><input id="repo" value="${esc(settings.repo)}" autocomplete="off" spellcheck="false"><span class="hint">Owner and name, like nattyvs/wardrobe-private.</span></div>
     <div class="field"><label class="cap" for="token">GitHub token</label><input id="token" type="password" value="${esc(settings.token)}" autocomplete="off" spellcheck="false" placeholder="github_pat_…"><span class="hint">A fine-grained token with read and write access to that repo's contents. It stays on this phone.</span></div>
     <div class="toggles"><label class="toggle"><span>Sample wardrobe<small>Show the demo pieces instead of yours.</small></span><input type="checkbox" class="switch" id="sample" ${settings.sample?'checked':''}></label></div>
@@ -2203,7 +2261,7 @@ function viewTripForm(d){
   const stop = (s,i) => `<div class="stop"><div class="stophead"><span class="cap">Stop ${i+1}</span>${d.stops.length>1?`<button type="button" class="linkish" data-act="rmstop" data-i="${i}">Remove</button>`:''}</div>
     <div class="field"><label class="cap" for="pl${i}">Place</label><div class="inrow"><input id="pl${i}" data-draft="place" data-i="${i}" value="${esc(s.place)}" placeholder="A city" autocomplete="off" spellcheck="false"><button type="button" class="linkish" data-act="findplace" data-i="${i}">Find</button></div>
     ${s.results ? (s.results.length ? `<ul class="finds">${s.results.map((r,k)=>`<li><button type="button" data-act="pickplace" data-i="${i}" data-r="${k}">${esc(r.label)}</button></li>`).join('')}</ul>` : '<span class="hint">No match. Try a nearby city.</span>') : (s.lat!=null ? '<span class="hint">Place matched. The forecast will use it.</span>' : '<span class="hint">Tap Find to match the place, or Save and the app will match it.</span>')}</div>
-    <div class="two"><div class="field"><label class="cap" for="fr${i}">From</label><input type="date" id="fr${i}" data-draft="from" data-i="${i}" value="${esc(s.from)}"></div><div class="field"><label class="cap" for="to${i}">To</label><input type="date" id="to${i}" data-draft="to" data-i="${i}" value="${esc(s.to)}"></div></div></div>`;
+    <div class="two"><div class="field"><label class="cap" for="fr${i}">From</label><input type="date" lang="en-GB" id="fr${i}" data-draft="from" data-i="${i}" value="${esc(s.from)}"><span class="hint" data-fmt="fr${i}">${s.from?longDate(s.from):'Pick a date'}</span></div><div class="field"><label class="cap" for="to${i}">To</label><input type="date" lang="en-GB" id="to${i}" data-draft="to" data-i="${i}" value="${esc(s.to)}"><span class="hint" data-fmt="to${i}">${s.to?longDate(s.to):'Pick a date'}</span></div></div></div>`;
   return `${masthead()}
   <header class="pagehead"><h1 class="page">${isNew?'New trip':'Edit trip'}</h1><p class="lede">Where, when and what the days involve.</p></header>
   <div class="stack">
@@ -2256,6 +2314,13 @@ function viewTrip(id, sub){
 /* ---------------- sheets ---------------- */
 function openSheet(html){ document.body.classList.add('sheet-open'); const s=$('#sheet'); s.onscroll=null; s.classList.remove('packonly'); s.innerHTML=html; s.classList.add('open'); $('#scrim').classList.add('open'); setTimeout(()=>{ const f=s.querySelector('[data-close]'); f&&f.focus(); }, 50); }
 function closeSheet(){ document.body.classList.remove('sheet-open'); $('#sheet').classList.remove('open'); $('#scrim').classList.remove('open'); }
+// Tapping the occasion tag opens this chooser. Nothing changes until she picks one; the note is kept whichever she picks, and shown on customer days.
+function sheetOcc(date){
+  const cur = occasionFor(date), note = (S.state.dayOcc[date]||{}).note || cur.note || '';
+  openSheet(`<div class="bar"><span class="cap" id="sheetTitle">${esc(dayName(date))} ${esc(nice(date))}</span><button type="button" class="linkish" data-close>Close</button></div>
+  <div class="occopts" role="group" aria-label="Kind of day">${Object.entries(OCC).map(([k,l])=>`<button type="button" class="label" data-occpick="${k}" data-date="${date}" aria-pressed="${k===cur.occ}">${l}${k===cur.occ?'<span class="now">Now</span>':''}</button>`).join('')}</div>
+  <div class="field occnote"><label class="cap" for="occnote">Note</label><input id="occnote" value="${esc(note)}" maxlength="60" placeholder="Meeting 14:00" autocomplete="off"><span class="hint">Shown on customer days.</span></div>`);
+}
 function ruleLine(r, id){
   if(r.kind==='pair'){ const other = piece(r.a===id ? r.b : r.a); return `Not paired with the ${other ? other.name.toLowerCase() : 'other piece'} after ${r.n} "Colours looked dead" reports.`; }
   return ruleText(r);
@@ -2734,10 +2799,17 @@ document.addEventListener('click', async e=>{
   if(t.dataset.lookocc){ S.ui.look.occ = t.dataset.lookocc; render(); return; }
   if(t.dataset.looktag){ const d = S.ui.look, k = t.dataset.looktag; d.tags = d.tags.includes(k) ? d.tags.filter(x=>x!==k) : [...d.tags, k]; t.setAttribute('aria-pressed', d.tags.includes(k)); return; }
   if(t.dataset.inspotag){ const d = S.ui.inspo, k = t.dataset.inspotag; d.tags = d.tags.includes(k) ? d.tags.filter(x=>x!==k) : [...d.tags, k]; t.setAttribute('aria-pressed', d.tags.includes(k)); return; }
+  if(t.dataset.occpick){
+    const d = t.dataset.date, k = t.dataset.occpick, box = $('#occnote');
+    S.state.dayOcc[d] = {occ:k, note: box ? box.value.trim().slice(0,60) : ((S.state.dayOcc[d]||{}).note||'')};
+    queuePush({state:true}); closeSheet(); render(); toast(OCC[k]); return;
+  }
   if(t.dataset.officeweek){ S.ui.officeWeek = t.dataset.officeweek; render(); return; }
   if(t.dataset.office){
-    const d = t.dataset.office, k = occasionFor(d).occ, inOffice = k==='office' || k==='customer';
-    S.state.dayOcc[d] = {occ: inOffice ? 'off' : 'office', note:''};
+    const d = t.dataset.office, k = occasionFor(d).occ;
+    // A customer day means going in, so unticking it here would quietly lose the customer. It stays; she changes it on the day.
+    if(k==='customer'){ toast('A customer day means you are in. Change it from the day’s tag.'); return; }
+    S.state.dayOcc[d] = {occ: k==='office' ? 'off' : 'office', note:(S.state.dayOcc[d]||{}).note||''};
     queuePush({state:true}); render(); return;
   }
   if(t.dataset.status){ setStatus(t.dataset.id, t.dataset.status); return; }
@@ -2816,9 +2888,7 @@ document.addEventListener('click', async e=>{
   }
   if(act==='city'){ settings.city = settings.city==='London' ? 'Paris' : 'London'; saveSettings(); await loadWeather(true); render(); toast(`Forecast for ${settings.city}`); }
   else if(act==='occ'){
-    const d = t.dataset.date, cur = occasionFor(d).occ, nx = {office:'customer', customer:'off', off:'office'}[cur];
-    S.state.dayOcc[d] = {occ:nx, note: nx==='customer' ? (occasionFor(d).note||'') : ''};
-    queuePush({state:true}); render(); toast(OCC[nx]);
+    sheetOcc(t.dataset.date);
   }
   else if(act==='wear'){
     const d = t.dataset.date, o = outfitFor(d);
@@ -2919,11 +2989,12 @@ document.addEventListener('click', async e=>{
   }
   else if(act==='savesettings'){
     settings.repo = $('#repo').value.trim(); settings.token = $('#token').value.trim(); const wasSample = settings.sample; settings.sample = $('#sample').checked; saveSettings();
-    if(!settings.sample && wasSample){ S.closet = []; S.log = (S.log||[]).filter(e=>e.source!=='sample'); S.state.dayOcc = {}; S.state.sampleSeeded = null; }
+    if(!settings.sample && wasSample) dropSample();
+    if(settings.sample && !wasSample){ S.real = false; setConnErr(null); }
     if(settings.sample){ ensureSample(); persist(); render(); toast('Showing the sample'); return; }
-    if(!settings.token){ toast('Add a token to sync'); return; }
+    if(!settings.token){ render(); toast('Add a token to sync'); return; }
     toast('Syncing…');
-    try{ await pull(); render(); toast(closet().length ? `Synced ${closet().length} pieces` : 'Connected. The closet is empty so far.'); }catch(err){ toast(err.message); }
+    try{ await pull(); render(); const n = closet().length; toast(n ? `Connected, ${n} ${n===1?'piece':'pieces'}` : 'Connected. The closet is empty so far.'); }catch(err){ render(); toast(err.message); }
   }
 });
 document.addEventListener('scroll', e=>{
@@ -2940,7 +3011,7 @@ document.addEventListener('input', e=>{
   if(sx.id==='inspourl' && S.ui.inspo) S.ui.inspo.url = sx.value;
   const el = e.target, d = S.ui.draft; if(!d || !el.dataset.draft) return;
   if(el.dataset.draft==='name') d.name = el.value;
-  else { const s = d.stops[+el.dataset.i]; if(!s) return; s[el.dataset.draft] = el.value; if(el.dataset.draft==='place'){ s.lat = null; s.lon = null; s.results = null; } }
+  else { const s = d.stops[+el.dataset.i]; if(!s) return; s[el.dataset.draft] = el.value; const fm = document.querySelector(`[data-fmt="${el.id}"]`); if(fm) fm.textContent = el.value ? longDate(el.value) : 'Pick a date'; if(el.dataset.draft==='place'){ s.lat = null; s.lon = null; s.results = null; } }
 });
 document.addEventListener('change', async e=>{
   const el = e.target;
@@ -3011,7 +3082,8 @@ async function syncNow(quiet){
   try{
     if(Object.keys(queuePush.what||{}).length || Object.keys(LS.get('wd.pending', {})).length){ queuePush.what = Object.assign(LS.get('wd.pending', {}), queuePush.what||{}); await pushChain.then(runPush).catch(()=>{}); }
     await flushOutbox(); await pull(); await loadWeather(); render(); if(!quiet) toast('Back online. Synced.');
-  }catch(e){} finally{ syncing = false; updateNet(); }
+    if(Object.keys(queuePush.what||{}).length) schedulePush();
+  }catch(e){ render(); } finally{ syncing = false; updateNet(); }
 }
 window.addEventListener('online', ()=>{ updateNet(); syncNow(); });
 window.addEventListener('offline', updateNet);
@@ -3020,6 +3092,7 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && navig
 /* ---------------- boot ---------------- */
 window.addEventListener('hashchange', ()=>{ closeSheet(); if(!isTripForm(route())){ S.ui.draft = null; S.ui.draftKey = null; S.ui.confirmDel = null; } render({settle: route().name==='today' || route().name==='day'}); window.scrollTo(0,0); });
 async function boot(){
+  if(!settings.sample && closet().some(p=>isSampleId(p.id))) dropSample(); // sample pieces left in the cache never pass for hers
   ensureSample();
   if(!S.weather || S.weather.city!==settings.city) S.weather = sampleWeather();
   render({settle:true});
@@ -3028,6 +3101,7 @@ async function boot(){
   if(Object.keys(waiting).length){ queuePush.what = Object.assign(waiting, queuePush.what||{}); }
   // Pull first, so pieces changed elsewhere arrive, then send what was waiting: pushes re-read GitHub before writing.
   if(ghReady() && navigator.onLine){ try{ await pull(); }catch(e){ if(navigator.onLine) toast(e.message); } }
+  else if(ghReady()) setConnErr('Offline.');
   persist();
   render();
   if(Object.keys(queuePush.what||{}).length) schedulePush();
