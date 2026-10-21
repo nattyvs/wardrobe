@@ -68,6 +68,9 @@ function sinceWords(s){
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cap1 = s => s ? s[0].toUpperCase()+s.slice(1) : s;
+// Colour tokens for places CSS cannot reach (drawn garments, the flat-lay image). Same values as --rule-soft and --paper in index.html.
+const HEX_NONE = '#D3CCC1', PAPER = '#FBFBFA';
+const lc1 = s => s ? s[0].toLowerCase()+s.slice(1) : s; // lower-case the first letter only, so month names keep their capital
 function hash(str){ let h=2166136261; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return (h>>>0)/4294967295; }
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); document.body.classList.add('toasting'); clearTimeout(toast.t); toast.t=setTimeout(()=>{ t.classList.remove('show'); document.body.classList.remove('toasting'); },2200); } // a toast and the sync note share one slot: the note steps aside while a toast shows
 
@@ -245,8 +248,8 @@ function art(p){
   if(p.photo && S.photos[p.photo]) return `<img src="${S.photos[p.photo]}" alt="${esc(p.name)}">`;
   if(p.photo && settings.token && !settings.sample){ loadPhoto(p.photo);
     // Marked so the photo can take the drawing's place when it arrives, even inside an open sheet.
-    return window.garmentSVG(p.shape||'tee', p.hex||'#999', p.name).replace('<svg', `<svg data-ph="${esc(p.photo)}" data-alt="${esc(p.name)}"`); }
-  return window.garmentSVG(p.shape||'tee', p.hex||'#999', p.name);
+    return window.garmentSVG(p.shape||'tee', p.hex||HEX_NONE, p.name).replace('<svg', `<svg data-ph="${esc(p.photo)}" data-alt="${esc(p.name)}"`); }
+  return window.garmentSVG(p.shape||'tee', p.hex||HEX_NONE, p.name);
 }
 
 /* ---------------- piece state: status, on repeat, reactions, rules ---------------- */
@@ -1443,14 +1446,26 @@ function route(){
 const isTripForm = r => r.name==='trip' && (r.arg==='new' || r.sub==='edit');
 // Trim the hero to the lowest piece (plus room for the number under a hem), so no blank band sits under the shoes.
 let heroRO;
+// A small flat-lay piece takes a 44px hit area from a pseudo-element, but only on the sides where no lower piece sits under it,
+// so the scarf's slop never steals taps from the coat beside it. Where a neighbour is in the way the hit area stops at the piece's own box.
+function slopHero(st, ps){
+  const box = p => ({l:p.offsetLeft, t:p.offsetTop, r:p.offsetLeft+p.offsetWidth, b:p.offsetTop+p.offsetHeight, z:+(getComputedStyle(p).zIndex)||0});
+  const bx = ps.map(box);
+  ps.forEach((p,i)=>{ const a = bx[i], w = a.r-a.l, h = a.b-a.t, dx = Math.max(0,(44-w)/2), dy = Math.max(0,(44-h)/2);
+    const hit = (l,t,r,b) => bx.some((o,j)=>j!==i && o.z<=a.z && o.l<r && o.r>l && o.t<b && o.b>t);
+    const set = (k,v) => p.style.setProperty('--hs-'+k, v+'px');
+    set('l', dx && !hit(a.l-dx,a.t,a.l,a.b) ? dx : 0); set('r', dx && !hit(a.r,a.t,a.r+dx,a.b) ? dx : 0);
+    set('t', dy && !hit(a.l,a.t-dy,a.r,a.t) ? dy : 0); set('b', dy && !hit(a.l,a.b,a.r,a.b+dy) ? dy : 0); });
+}
 function fitHero(){
   if(heroRO) heroRO.disconnect();
   const h = $('.hero'), st = h && $('.stage'), ps = st ? [...st.querySelectorAll('.piece')] : [];
   if(!ps.length || $('.heropic')) return;
-  const fit = () => { h.style.height = Math.ceil(Math.max(260, st.offsetTop + Math.max(...ps.map(p=>p.offsetTop + p.offsetHeight + (p.classList.contains('slot-bottom') ? 22 : 10))))) + 'px'; };
+  const fit = () => { slopHero(st, ps); h.style.height = Math.ceil(Math.max(260, st.offsetTop + Math.max(...ps.map(p=>p.offsetTop + p.offsetHeight + (p.classList.contains('slot-bottom') ? 22 : 10))))) + 'px'; };
   fit();
   if(window.ResizeObserver){ heroRO = new ResizeObserver(fit); ps.forEach(p=>heroRO.observe(p)); }
 }
+const routeTitle = r => r.name==='day' && r.arg && r.arg!==TODAY ? `${dayName(r.arg)} ${nice(r.arg)}` : r.name==='trip' ? (r.arg==='new' ? 'New trip' : 'Trip') : ({today:'Today', day:'Today', week:'Week', trips:'Trips', closet:r.arg==='more'?'Get more from it':'Closet', style:'Style', log:r.arg==='settings'?'Settings':'Log'}[r.name] || 'Wardrobe');
 function render(opts){
   const r = route(), app = $('#app');
   const tab = r.name==='day' ? (r.arg===TODAY ? 'today' : 'week') : (r.name==='trip' || r.name==='trips') ? 'week' : r.name;
@@ -1463,7 +1478,9 @@ function render(opts){
   else if(r.name==='log') app.innerHTML = viewLog(r.arg||TODAY);
   else if(r.name==='style') app.innerHTML = viewStyle(r.arg);
   else app.innerHTML = viewDay(r.name==='day' && r.arg ? r.arg : TODAY, opts && opts.settle);
-  document.title = 'Wardrobe';
+  const title = routeTitle(r), key = r.name+'/'+(r.arg||'')+'/'+(r.sub||'');
+  document.title = title==='Today' ? 'Wardrobe' : title+' · Wardrobe';
+  if(S.ui.routeKey!==key){ const first = S.ui.routeKey==null; S.ui.routeKey = key; const t = $('#toast'); if(!first && t && !t.classList.contains('show')) t.textContent = title; } // the status region says the new view without showing a toast
   fitHero();
   const ob = $('#ownbody'); if(ob && $('#sheet').classList.contains('open')) ob.innerHTML = ownBody();
 }
@@ -1539,7 +1556,7 @@ function viewDay(date, settle){
   }).join('');
   const cf = []; const cseen = {};
   o.list.forEach(({p})=>{ const f = fabricOf(p); const k = (p.colour||'')+'|'+f.name; if(cseen[k]) return; cseen[k]=1;
-    const sw = p.swatch && S.photos[p.swatch] ? `background-image:url(${S.photos[p.swatch]})` : `background-color:${esc(p.hex||'#999')}`;
+    const sw = p.swatch && S.photos[p.swatch] ? `background-image:url(${S.photos[p.swatch]})` : `background-color:${esc(p.hex||HEX_NONE)}`;
     if(p.swatch && !S.photos[p.swatch] && ghReady()) loadPhoto(p.swatch);
     cf.push(`<li><i style="${sw}" role="img" aria-label="${esc((p.colour||'')+' '+f.name)}"></i><span><span class="t">${esc(p.colour||'')}${f.name?` · ${esc(f.name)}`:''}</span><span class="s">${esc(f.note)}</span></span></li>`); });
   const strip = weekOf(date).map(d=>{ const ww = wx(d), oc = occasionFor(d).occ; return `<a href="#day/${d}" class="${d===date?'on':''}" aria-label="${dayName(d)} ${nice(d)}"><span class="label">${dayShort(d)}</span><b>${ww?ww.feel+'°':'·'}</b><i class="${oc==='customer'?'':'no'}"></i></a>`; }).join('');
@@ -1557,7 +1574,7 @@ function viewDay(date, settle){
   <div class="herow" data-swipe="${pics.length}">
   <section class="hero${settle?' settle':''}" aria-label="${dayName(date)}'s outfit">
     <div class="day" aria-hidden="true">${dayShort(date)}</div>
-    <div class="date">${esc(nice(date))}${isToday?'':' · planned'}</div>
+    <div class="date">${esc(nice(date))}${isToday?'':date<TODAY?'':' · planned'}</div>
     <div class="temp"><div class="deg">${w?w.feel+'°':'–'}</div><span class="fc">${esc(forecastLine(w, date))}</span></div>
     <div class="stage">${pieces || `<p class="empty" style="position:absolute;left:var(--gutter);top:45%">Nothing in the closet fits this day yet.</p>`}</div>
   </section>${picSlides}
@@ -1575,17 +1592,20 @@ function viewDay(date, settle){
   ${bagRowHTML(o, date)}
   <div class="acts main">${actions}</div>
   <nav class="strip" aria-label="This week">${strip}</nav>
-  <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">${worthTrying(o, date) ? 'Worth trying on in ChatGPT' : 'Try it on in ChatGPT'}</button></div>`:''}</section>
+  <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">Try it on in ChatGPT</button></div>`:''}</section>
   <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>
   ${(()=>{ const sc = o.score || (o.list.length ? lookScore(o.slots, date, {}) : null); if(!sc) return ''; const w = weights();
     return fold('today.scores', {cls:'panel', title:'How it scores', open:false, body:`<p class="caption pad">Six things a stylist weighs. The weights shift as you rate looks.</p><ul class="scores">${FACTORS.map(([k,l])=>`<li><span class="t">${l}<small>${Math.round(w[k]*100)}% of the score</small></span><span class="bar" aria-label="${Math.round(sc.f[k]*100)} out of 100"><i style="width:${Math.round(sc.f[k]*100)}%"></i></span>${sc.note[k]?`<span class="s">${esc(sc.note[k])}</span>`:''}</li>`).join('')}</ul>`}); })()}`;
 }
 
 function dayRowHTML(d, place){
-  const o = outfitFor(d), w = wx(d), oc = occasionFor(d);
-  const thumbs = o.list.map(({p})=>`<span>${art(p)}</span>`).join('');
-  const names = o.list.map(({p})=>p.name).join(', ');
-  return `<li class="${d===TODAY?'today':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':oc.occ==='off'?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${o.list.length?`<div class="rowact">${worthTrying(o, d) ? '<span class="worth">Worth trying on</span>' : ''}<button type="button" class="linkish" data-act="tryon" data-date="${d}" aria-label="Try on ${esc(dayName(d))}'s look in ChatGPT">Try on</button></div>`:''}</li>`;
+  const past = d<TODAY, o = outfitFor(d), w = wx(d), oc = occasionFor(d);
+  // A past day reads as past: what was logged that day (the sample history counts), or a plain "Nothing logged", and no Try on.
+  const ent = past ? log().find(e=>e.date===d && e.items && e.items.length) : null;
+  const list = past ? (ent ? ent.items.map(piece).filter(Boolean) : []) : o.list.map(x=>x.p);
+  const thumbs = list.map(p=>`<span>${art(p)}</span>`).join('');
+  const names = past ? (list.length ? `Worn: ${list.map(p=>p.name).join(', ')}` : 'Nothing logged') : list.map(p=>p.name).join(', ');
+  return `<li class="${d===TODAY?'today':past?'past':''}"><a href="#day/${d}"><span class="dn">${dayShort(d)}</span><span class="meta"><span class="top"><span class="tag ${oc.occ==='customer'?'customer':oc.occ==='off'?'off':''}">${OCC[oc.occ]}</span><span class="t">${w?w.feel+'°':''}</span></span><span class="thumbs">${thumbs}</span><span class="names">${esc(nice(d))}${place?` · ${esc(place)}`:''}. ${esc(names)}</span></span></a>${!past && o.list.length?`<div class="rowact"><button type="button" class="linkish" data-act="tryon" data-date="${d}" aria-label="Try it on in ChatGPT: ${esc(dayName(d))}'s look">Try on</button></div>`:''}</li>`;
 }
 function tripStripHTML(){
   const t = upcomingTrips()[0]; if(!t) return '';
@@ -1617,7 +1637,7 @@ function weekInspo(startDay){
 }
 function inspoRowsHTML(startDay){
   return weekInspo(startDay).map((o,i)=>{ const w = wx(o.forDay);
-    return `<li class="olook"><span class="dn">${pad(i+1)}</span><span class="meta"><span class="top"><span class="label">${w?`Dressed for ${w.feel}°`:'Office look'}</span></span><span class="thumbs">${o.list.map(({p})=>`<span>${art(p)}</span>`).join('')}</span><span class="names">${esc(o.list.map(({p})=>p.name).join(', '))}. Built for ${esc(dayName(o.forDay))}'s weather.</span></span><div class="rowact"><button type="button" class="linkish" data-act="tryon" data-inspo="${esc(startDay)}|${i}" aria-label="Try on in ChatGPT">Try on</button></div></li>`; }).join('');
+    return `<li class="olook"><span class="dn">${pad(i+1)}</span><span class="meta"><span class="top"><span class="label">${w?`Dressed for ${w.feel}°`:'Office look'}</span></span><span class="thumbs">${o.list.map(({p})=>`<span>${art(p)}</span>`).join('')}</span><span class="names">${esc(o.list.map(({p})=>p.name).join(', '))}. Built for ${esc(dayName(o.forDay))}'s weather.</span></span><div class="rowact"><button type="button" class="linkish" data-act="tryon" data-inspo="${esc(startDay)}|${i}" aria-label="Try it on in ChatGPT: office look ${i+1}">Try on</button></div></li>`; }).join('');
 }
 function officePicker(){
   const next = S.ui.officeWeek==='next', start = next ? addDays(monday(TODAY),7) : TODAY;
@@ -1718,8 +1738,8 @@ function viewCloset(filter){
       <div class="acts"><button type="button" class="btn" data-act="closedrawer">Show <span id="cd-n">${closetCount()}</span></button><button type="button" class="linkish" data-act="clearfilters">Clear all</button></div>
     </div></aside>`;
   return `${masthead()}
-  <header class="pagehead withlink compact"><h1 class="page">Closet</h1><div class="toprow"><button type="button" class="ownbtn" data-act="ownopen" aria-label="Do I already own this? Check a photo">${OWN_ICON}</button><a class="toplink" href="#closet/more"><span class="label">Get more from it</span></a></div><p class="lede">${lede}</p></header>
-  <div class="ctypes"><button type="button" class="cfilter" data-act="opendrawer" aria-label="Filter${active?`, ${active} on`:''}"><svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M3 5h14M6 10h8M8.5 15h3"/></svg>${active?`<b>${active}</b>`:''}</button><div class="filters" role="toolbar" aria-label="Type">${typeBarHTML}</div></div>
+  <header class="pagehead withlink compact"><h1 class="page">Closet</h1><div class="toprow"><a class="toplink" href="#closet/more"><span class="label">Get more from it</span></a><button type="button" class="toplink" data-act="ownopen" aria-label="Do I already own this? Check a photo"><span class="label">Do I own this?</span></button></div><p class="lede">${lede}</p></header>
+  <div class="ctypes"><button type="button" class="cfilter label" data-act="opendrawer" aria-label="Filter${active?`, ${active} on`:''}">Filter${active?`<b>${active}</b>`:''}</button><div class="filters" role="toolbar" aria-label="Type">${typeBarHTML}</div></div>
   <div id="closet-results">${closetBody()}</div>
   ${drawer}`;
 }
@@ -1736,8 +1756,11 @@ function closetBody(){
   const live = p => !p.dontWear && statusOf(p)!=='donate';
   const item = p => { const s = st[p.id], rep = onRepeatSince(p.id), sx = statusOf(p);
     const fresh = hasHistory() && live(p) && sx==='available' && !rep && (!s.last || daysBetween(s.last, TODAY)>=60);
-    const line = p.dontWear ? 'Set aside' : sx!=='available' ? STATUS[sx] : rep ? `On repeat since ${shortDate(rep)}` : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : '';
-    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span>${line?`<span class="st${fresh?' fresh':''}">${esc(line)}</span>`:''}</button>${loveBtn(p.id)}${repeatBtn(p.id)}${sideBtn(p)}</div>`; };
+    // Never worn is the loudest caption: pink, bold and uppercase, in words. Owned, available, no wears, and not just added (when the piece carries an added date).
+    const added = p.added ? (typeof p.added==='number' ? p.added : Date.parse(p.added)) : 0, justAdded = added && Date.now()-added < 14*864e5;
+    const never = hasHistory() && live(p) && sx==='available' && !rep && !s.count && !justAdded;
+    const line = p.dontWear ? 'Set aside' : sx!=='available' ? STATUS[sx] : rep ? `On repeat since ${shortDate(rep)}` : s.count ? `${sinceWords(s.last)} · ${s.count} wear${s.count>1?'s':''}` : never ? 'Never worn' : '';
+    return `<div class="tile"><button type="button" class="item${p.dontWear||sx!=='available'?' aside':''}" data-piece="${esc(p.id)}"><span class="img">${art(p)}</span><span class="nm">${esc(p.name).replace(/(\S+-\S+)/g,'<span class="nb">$1</span>')}</span>${line?`<span class="st${fresh||never?' fresh':''}${never?' never':''}">${esc(line)}</span>`:''}</button>${loveBtn(p.id)}${repeatBtn(p.id)}${sideBtn(p)}</div>`; };
   const list = closetList(filter);
   if(filter==='doubles'){
     const ids = new Set(list.map(p=>p.id)), dbl = doubles().filter(g=>g.some(p=>ids.has(p.id)));
@@ -2163,7 +2186,6 @@ function sheetInspo(id){
     <div class="acts">${x.url?`<a class="linkish" href="${esc(x.url)}" target="_blank" rel="noopener">Open link</a>`:''}<button type="button" class="linkish rm" data-act="rmstyle" data-kind="inspo" data-id="${esc(x.id)}">Remove</button></div></div>`);
 }
 /* Do I already own this? Lives in the Closet now. The first time it explains the 90 MB download. */
-const OWN_ICON = '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M3 6.5h3l1.2-2h5.6l1.2 2h3v9H3z"/><circle cx="10" cy="10.8" r="2.8"/></svg>';
 function ownBody(){
   const own = S.ui.own;
   const res = own ? (()=>{ const w = wrongFor(own.ref), list = (own.overall||[]).filter(m=>!w.has(m.id) && piece(m.id)).slice(0,4), top = list[0];
@@ -2372,7 +2394,7 @@ function sheetPiece(id, tab){
     <div class="segs ptabs" role="tablist" aria-label="Sections">${tabsHTML}</div>
     <div class="ppane" data-pane="wear"${hid("wear")}>
     <dl class="facts">
-      <dt>Worn</dt><dd>${s.count?`${s.count} time${s.count>1?'s':''} · ${esc(sinceWords(s.last).toLowerCase())}`:esc(sinceWords(null))}</dd>
+      <dt>Worn</dt><dd>${s.count?`${s.count} time${s.count>1?'s':''} · ${esc(lc1(sinceWords(s.last)))}`:esc(sinceWords(null))}</dd>
       <dt>Fabric</dt><dd>${esc([f.name, f.note].filter(Boolean).join('. '))}</dd>
       <dt>Warmth</dt><dd>${warmW}${rules().warm[id]?' (adjusted by your reports)':''}</dd>
     </dl>
@@ -2559,7 +2581,7 @@ async function photoURL(path){
 }
 function drawnURL(p){
   // a stand-in drawing (sample wardrobe, or a piece with no photo) as an image the canvas can use
-  let svg = window.garmentSVG(p.shape||'tee', p.hex||'#999', '');
+  let svg = window.garmentSVG(p.shape||'tee', p.hex||HEX_NONE, '');
   const vb = (svg.match(/viewBox="([^"]+)"/)||[])[1], v = vb ? vb.split(/\s+/).map(Number) : [0,0,100,100];
   svg = svg.replace('<svg ', `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="${Math.round(400*v[3]/v[2])}" `);
   return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
@@ -2579,7 +2601,7 @@ async function collage(o){
   const bigRows = Math.ceil(big.length/2), smallRows = Math.ceil(small.length/3);
   const H = M + bigRows*bh + Math.max(0,bigRows-1)*G + (small.length ? 2*G + smallRows*sh + (smallRows-1)*G : 0) + M;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const c = cv.getContext('2d'); c.fillStyle = '#F7F6F3'; c.fillRect(0,0,W,H);
+  const c = cv.getContext('2d'); c.fillStyle = PAPER; c.fillRect(0,0,W,H);
   c.imageSmoothingQuality = 'high';
   const put = (im, x, y, w, h) => { const k = Math.min((w-2*PAD)/im.width, (h-2*PAD)/im.height); const iw = im.width*k, ih = im.height*k; c.drawImage(im, x+(w-iw)/2, y+(h-ih)/2, iw, ih); };
   const place = (list, cols, cw, ch, y0) => list.forEach((it,i)=>{
@@ -2657,23 +2679,6 @@ function decideTryon(id, yes){
   queuePush({style:true}); render(); toast(yes ? 'Settled. More like this.' : 'Settled. It shapes future looks.');
 }
 function verdictWords(t){ return t.verdict==='y' ? 'You loved it' : t.verdict==='m' ? 'Not sure yet' : `Not for you${(t.off||[]).length ? ': '+t.off.map(k=>(OFF_TAGS.find(x=>x[0]===k)||[])[1].toLowerCase()).join(', ') : ''}`; }
-// Worth rendering: a look the app is least sure of. A push or rediscover day, or a main piece never worn.
-function worthTrying(o, date){
-  if(!isoDate(date)) return false;
-  const wk = monday(date), memo = S.ui.memo.worth || (S.ui.memo.worth = {});
-  if(!memo[wk]){
-    // Two a week at most: push days first, then rediscover, then looks with a piece never worn.
-    const rank = d => { const x = outfitFor(d); if(!worthBase(x, d)) return 0; return x.mode==='push' ? 3 : x.mode==='rediscover' ? 2 : 1; };
-    memo[wk] = new Set(weekOf(date).filter(d=>d>=TODAY).map(d=>[d, rank(d)]).filter(x=>x[1]).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0])).slice(0,2).map(x=>x[0]));
-  }
-  return memo[wk].has(date);
-}
-function worthBase(o, date){
-  if(!o.list.length || o.logged) return false;
-  const items = o.list.map(x=>x.p.id); if(tryonFor(items) || realFor(items)) return false;
-  const st = stats(date);
-  return o.mode==='push' || o.mode==='rediscover' || o.list.some(({slot,p})=>['top','dress','bottom'].includes(slot) && !(st[p.id] && st[p.id].last));
-}
 function tryResultBlock(){
   const tr = S.ui.try; if(!tr) return '';
   const before = tryonFor(tr.items);
