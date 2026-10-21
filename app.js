@@ -1708,7 +1708,7 @@ function viewCloset(filter){
   const kinds = cf.type!=='all' ? (KINDS[cf.type]||[]).map(([k,l,f])=>[k,l,scope.filter(f).length]).filter(x=>x[2]) : [];
   const fams = CFAM.map(f=>[f, scope.filter(p=>famsOf(p).includes(f[0])).length]).filter(x=>x[1]);
   const drawer = `<div class="cscrim${S.ui.drawer?' open':''}" data-act="closedrawer"></div>
-  <aside class="cdrawer${S.ui.drawer && !S.ui.drawerJust?' open':''}" aria-label="Filters" ${S.ui.drawer?'':'aria-hidden="true"'}>
+  <aside class="cdrawer${S.ui.drawer && !S.ui.drawerJust?' open':''}" aria-label="Filters" ${S.ui.drawer?'':'aria-hidden="true" inert'}>
     <div class="cd-bar"><span class="cap">Filter</span><button type="button" class="linkish" data-act="closedrawer">Close</button></div>
     <div class="cd-body">
       <label class="cap" for="cq">Search</label><input id="cq" type="search" value="${esc(cf.q)}" placeholder="Name, colour, brand, fabric" autocomplete="off">
@@ -2313,8 +2313,15 @@ function viewTrip(id, sub){
 }
 
 /* ---------------- sheets ---------------- */
-function openSheet(html){ document.body.classList.add('sheet-open'); const s=$('#sheet'); s.onscroll=null; s.classList.remove('packonly'); s.innerHTML=html; s.classList.add('open'); $('#scrim').classList.add('open'); setTimeout(()=>{ const f=s.querySelector('[data-close]'); f&&f.focus(); }, 50); }
-function closeSheet(){ document.body.classList.remove('sheet-open'); $('#sheet').classList.remove('open'); $('#scrim').classList.remove('open'); }
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select,textarea,summary,[tabindex]:not([tabindex="-1"])';
+const openerKey = f => f && f!==document.body ? f.tagName.toLowerCase() + [...f.attributes].filter(a=>a.name==='id'||a.name==='href'||a.name.startsWith('data-')).map(a=>`[${a.name}="${a.value.replace(/["\\]/g,'\\$&')}"]`).join('') : null;
+// The sheet is a modal dialog: hidden and inert while closed; open, it takes focus, traps Tab, closes on Escape and hands focus back to whatever opened it.
+function openSheet(html){ const s=$('#sheet'), was=s.classList.contains('open');
+  if(openSheet.pend){ clearTimeout(openSheet.pend); openSheet.pend=0; } else if(!was){ openSheet.from=document.activeElement; openSheet.key=openerKey(openSheet.from); openSheet.hash=location.hash; }
+  document.body.classList.add('sheet-open'); s.onscroll=null; s.classList.remove('packonly'); s.innerHTML=html; s.inert=false; s.removeAttribute('aria-hidden'); s.classList.add('open'); $('#scrim').classList.add('open'); $('#app').inert=true; $('.tabs').inert=true;
+  setTimeout(()=>{ if(!s.classList.contains('open')) return; const f=s.querySelector('[data-close]')||s.querySelector(FOCUSABLE)||s; f.focus(); }, 50); }
+function closeSheet(){ const s=$('#sheet'), was=s.classList.contains('open'); document.body.classList.remove('sheet-open'); s.classList.remove('open'); s.inert=true; s.setAttribute('aria-hidden','true'); $('#scrim').classList.remove('open'); $('#app').inert=false; $('.tabs').inert=false; if(!was) return;
+  clearTimeout(openSheet.pend); openSheet.pend=setTimeout(()=>{ openSheet.pend=0; if(s.classList.contains('open') || location.hash!==openSheet.hash) return; const a=document.activeElement; if(a && a!==document.body && !s.contains(a)) return; const f=openSheet.from, t=f && f.isConnected ? f : openSheet.key && document.querySelector(openSheet.key); if(t) t.focus(); }, 30); }
 // Tapping the occasion tag opens this chooser. Nothing changes until she picks one; the note is kept whichever she picks, and shown on customer days.
 function sheetOcc(date){
   const cur = occasionFor(date), note = (S.state.dayOcc[date]||{}).note || cur.note || '';
@@ -2865,8 +2872,8 @@ document.addEventListener('click', async e=>{
   }
   if(act==='markdormant'){ sheetDormant(); return; }
   if(act==='rebuildday'){ delete S.state.swaps[t.dataset.date]; S.ui.memo = {}; queuePush({state:true}); render(); toast('Rebuilt for the weather'); return; }
-  if(act==='opendrawer'){ S.ui.drawer = true; S.ui.drawerJust = true; render(); requestAnimationFrame(()=>requestAnimationFrame(()=>{ S.ui.drawerJust = false; const d = document.querySelector('.cdrawer'); if(d) d.classList.add('open'); })); return; }
-  if(act==='closedrawer'){ S.ui.drawer = false; const d = document.querySelector('.cdrawer'), sc = document.querySelector('.cscrim'); if(d) d.classList.remove('open'); if(sc) sc.classList.remove('open'); setTimeout(render, 260); return; }
+  if(act==='opendrawer'){ S.ui.drawer = true; S.ui.drawerJust = true; render(); requestAnimationFrame(()=>requestAnimationFrame(()=>{ S.ui.drawerJust = false; const d = document.querySelector('.cdrawer'); if(d){ d.classList.add('open'); const c = d.querySelector('[data-act="closedrawer"]'); if(c) c.focus(); } })); return; }
+  if(act==='closedrawer'){ S.ui.drawer = false; const d = document.querySelector('.cdrawer'), sc = document.querySelector('.cscrim'); const wasIn = d && d.contains(document.activeElement); if(d){ d.classList.remove('open'); d.inert = true; d.setAttribute('aria-hidden','true'); } if(sc) sc.classList.remove('open'); setTimeout(()=>{ render(); if(wasIn){ const f = document.querySelector('.cfilter'); if(f) f.focus(); } }, 260); return; }
   if(act==='clearfilters'){ S.ui.cf = {type:closetFilters().type, kind:null, colours:[], q:''}; if((S.ui.closetFilter||'all')!=='all'){ location.hash = '#closet'; } render(); return; }
   if(act==='backpiece'){ sheetPiece(t.dataset.id); return; }
   if(act==='lookswith' || act==='withmore'){ t.textContent = 'Putting looks together…'; t.disabled = true; const id = t.dataset.id, r = act==='withmore' ? +t.dataset.round : 0; setTimeout(()=>sheetWith(id, r), 30); return; }
@@ -3057,7 +3064,9 @@ $('#scrim').addEventListener('click', closeSheet);
 document.addEventListener('toggle', e=>{ const d = e.target; if(!d.matches || !d.matches('details[data-fold]')) return;
   FOLD[d.dataset.fold] = d.open; LS.set('wd.fold', FOLD);
   if(d.open && d.dataset.fold==='style.rules') LS.set('wd.rulesSeen', +d.dataset.n || 0); }, true);
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); if(e.key==='Enter' && e.target.id==='extrain'){ e.preventDefault(); addExtra(e.target.dataset.trip); } });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ if($('#sheet').classList.contains('open')) closeSheet(); else { const c = document.querySelector('.cdrawer.open [data-act="closedrawer"]'); if(c) c.click(); } }
+  if(e.key==='Tab'){ const s = $('#sheet'); if(s.classList.contains('open')){ const f = [...s.querySelectorAll(FOCUSABLE)].filter(x=>x.getClientRects().length), a = document.activeElement;
+    if(!f.length){ e.preventDefault(); s.focus(); } else if(!s.contains(a)){ e.preventDefault(); f[0].focus(); } else if(e.shiftKey && (a===f[0] || a===s)){ e.preventDefault(); f[f.length-1].focus(); } else if(!e.shiftKey && a===f[f.length-1]){ e.preventDefault(); f[0].focus(); } } } if(e.key==='Enter' && e.target.id==='extrain'){ e.preventDefault(); addExtra(e.target.dataset.trip); } });
 function currentPicks(){ return [...document.querySelectorAll('[data-pick]')].filter(x=>x.checked).map(x=>x.dataset.pick); }
 function restorePicks(){ const keep = S.ui.keepPicks; if(!keep) return; document.querySelectorAll('[data-pick]').forEach(x=>x.checked = keep.includes(x.dataset.pick)); S.ui.keepPicks = null; }
 function upsertLog(date, patch){

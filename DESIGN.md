@@ -165,7 +165,7 @@ A warm stone neutral system with charcoal ink and one saturated signal.
 - **Section cap** (Didot 400, 11 to 15px, 0.16 to 0.3em, uppercase): Section names ("The look", "Colour and fabric"), the date under the day name, forecast caption, piece titles in notes and the closet grid. The masthead wordmark is the widest tracking (0.42em).
 - **Body** (Jost 300, 15px, line-height 1.5): Running copy and form input (16px in fields to stop iOS zoom).
 - **Caption** (Jost 300, 11 to 13.5px, stone ink): Compositions, wear counts, hints, credit-line fabrics.
-- **Label** (Jost 500, 9.5 to 11px, 0.14 to 0.22em, uppercase): Buttons, tags, tabs, filters, the city link.
+- **Label** (Jost 500, 11px, 0.14 to 0.22em, uppercase): Buttons, tags, tabs, filters, the city link.
 
 ### Named Rules
 **The Two Voices Rule.** Didot speaks, Jost operates. Anything read as editorial content is Didot at any size, including tappable piece names and the feel words; action labels, tags, tabs, captions and data are Jost. Didot is used at weight 400 only.
@@ -198,14 +198,14 @@ The one round form is the 5px customer-day dot under the week strip, a signal ma
 ### Buttons
 Tight, tracked and square; they read like the small print in a magazine.
 - **Shape:** square corners (0), 1px charcoal border.
-- **Primary:** charcoal fill, white text, Jost 500 10.5px at 0.22em uppercase, 14px by 16px padding. Used once per action row ("Wear this", "Save the log").
+- **Primary:** charcoal fill, white text, Jost 500 11px at 0.2em uppercase, 14px by 16px padding. Used once per action row ("Wear this", "Save the log").
 - **Ghost:** transparent with charcoal border and text; on hover it fills charcoal. Secondary actions ("Swap a piece", "Back").
 - **Disabled:** transparent, stone text, stone border ("Worn today").
 - **Text link action:** uppercase tracked label with a 4px-offset underline ("Close", "Add a photo").
-- **Focus:** 2px charcoal outline at 3px offset, globally.
+- **Focus:** 2px charcoal outline at 3px offset, globally. Every control has at least a 44px hit area: small text controls keep their size and take an invisible centred hit area.
 
 ### Tags
-- **Occasion tag:** Jost 500 10px, 0.22em uppercase, 5px by 7px, 1px charcoal border, no fill ("Office day"). Tappable to change the occasion.
+- **Occasion tag:** Jost 500 11px, 0.22em uppercase, 5px by 7px, 1px charcoal border, no fill ("Office day"). Tappable to change the occasion.
 - **Customer day:** pink fill and border, white text. The pink is the customer-day signal, not a control style.
 - **Day off:** stone border, stone text.
 
@@ -216,15 +216,15 @@ Tight, tracked and square; they read like the small print in a magazine.
 
 ### Inputs / Fields
 - **Style:** underline only, 1px charcoal bottom border, transparent ground, Jost 300 16px, no radius. Labels above as section caps.
-- **Focus:** the underline turns pink; no outline.
+- **Focus:** the underline turns pink and doubles to 2px, so the change reads without colour. Placeholder text is #68635B, 4.5:1 or better on paper and sand.
 - **Checkbox:** 22px charcoal square, filled charcoal with a white tick when checked.
-- **Switch:** 42 by 24px square track with a square 16px thumb; checked inverts to charcoal track and white thumb.
+- **Switch:** 42 by 24px square track with a square 16px thumb. Off is a hollow thumb on a paper track; on is a charcoal track, a filled white thumb and a small white tick, so the states differ without colour or position alone.
 - **Feel selector:** a segmented row of Didot words inside a charcoal frame, divided by charcoal rules; the pressed segment fills charcoal.
 
 ### Navigation
 - **Masthead:** "WARDROBE" in Didot 12px at 0.42em left; the city as an underlined Jost label right.
 - **Back link:** on a day page other than today, the masthead shows a chevron and "Week" in place of the Wardrobe word, 44px high, returning to the Week page.
-- **Tab bar:** fixed, white ground, charcoal top rule, five tabs (Today, Week, Closet, Style, Log), each a 22px line icon above a 9.5px label. Icons are 1.3px strokes in currentColor (sun, calendar, hanger, four-point star, circled tick), 1.6px when active. Inactive stone, active charcoal with a 1px underline on the label. Trips is not a tab: it is a text link at the top right of the Week page.
+- **Tab bar:** fixed, white ground, charcoal top rule, five tabs (Today, Week, Closet, Style, Log), each a 22px line icon above an 11px label. Icons are 1.3px strokes in currentColor (sun, calendar, hanger, four-point star, circled tick), 1.6px when active. Inactive stone, active charcoal with a 1px underline on the label. Trips is not a tab: it is a text link at the top right of the Week page.
 - **Filters and segments:** horizontal scrolling text labels; pressed state is charcoal with an underline, the count in Didot.
 
 ### Garment Flat (signature)
