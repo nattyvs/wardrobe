@@ -857,24 +857,22 @@ function outfitFor(date){
   res.adjusted = adjusted; res.fromPlan = fromPlan;
   return res;
 }
+// One sentence, the strongest reason first. Texture is left out: its note names the fabrics, which the notes below already do.
 function styleWhy(o){
   if(!o.score) return '';
   const w = weights();
-  const ranked = ['colour','silhouette','coherence','texture','preference'].filter(k=>o.score.note[k]).sort((a,b)=>w[b]*o.score.f[b]-w[a]*o.score.f[a]);
-  return ranked.slice(0,2).map(k=>o.score.note[k]).join(' ');
+  const ranked = ['colour','silhouette','coherence','preference'].filter(k=>o.score.note[k]).sort((a,b)=>w[b]*o.score.f[b]-w[a]*o.score.f[a]);
+  return ranked.length ? o.score.note[ranked[0]] : '';
 }
+const firstSentence = s => { s = String(s||'').trim(); const m = s.match(/^.*?[.!?](?=\s|$)/); return m ? m[0] : s; };
 function whyLine(o, date){
-  if(o.why) return o.why;
-  const st = stats(date), bits = [];
-  const sw = styleWhy(o); if(sw) bits.push(sw);
-  if(o.hero && hasHistory()){ const l = st[o.hero.id] && st[o.hero.id].last; bits.push(l ? `The ${o.hero.name.toLowerCase()} hasn't been out since ${MONTHS[parse(l).getMonth()]}.` : `The ${o.hero.name.toLowerCase()} gets its first outing.`); }
-  const warm = o.slots.outer || o.slots.top;
-  if(warm && o.need>=3 && fabricOf(warm).name) bits.push(`${fabricOf(warm).name} for ${Math.round(o.temp)}°.`);
-  else if(warm && o.need>=3) bits.push(`The ${warm.name.toLowerCase()} for ${Math.round(o.temp)}°.`);
-  else if(o.need<=2) bits.push(`Light layers for ${Math.round(o.temp)}°.`);
-  if(o.occ==='customer') bits.push('Dressed up a notch for the meeting.');
-  if(o.slots.accessory && o.slots.bottom && !o.slots.belt && !hasLoops(o.slots.bottom) && o.slots.accessory.shape==='scarf') bits.push('No belt loops, so the scarf is the accent.');
-  return bits.join(' ');
+  if(o.why) return firstSentence(o.why);
+  const t = Math.round(o.temp);
+  if(!wx(date)) return `No forecast for this day yet, so ${t}° is a guess.`;
+  if(o.hero && hasHistory()){ const l = stats(date)[o.hero.id] && stats(date)[o.hero.id].last; return l ? `The ${o.hero.name.toLowerCase()} hasn't been out since ${MONTHS[parse(l).getMonth()]}.` : `The ${o.hero.name.toLowerCase()} gets its first outing.`; }
+  if(o.occ==='customer') return 'Dressed up a notch for the meeting.';
+  const sw = firstSentence(styleWhy(o)); if(sw) return sw;
+  return o.need>=3 ? `Warm layers for ${t}°.` : `Light layers for ${t}°.`;
 }
 
 /* ---------------- trips: weather per stop ---------------- */
@@ -1395,6 +1393,16 @@ function route(){
   return {name: h[0]||'today', arg: h[1]||null, sub: h[2]||null};
 }
 const isTripForm = r => r.name==='trip' && (r.arg==='new' || r.sub==='edit');
+// Trim the hero to the lowest piece (plus room for the number under a hem), so no blank band sits under the shoes.
+let heroRO;
+function fitHero(){
+  if(heroRO) heroRO.disconnect();
+  const h = $('.hero'), st = h && $('.stage'), ps = st ? [...st.querySelectorAll('.piece')] : [];
+  if(!ps.length || $('.heropic')) return;
+  const fit = () => { h.style.height = Math.ceil(Math.max(260, st.offsetTop + Math.max(...ps.map(p=>p.offsetTop + p.offsetHeight + (p.classList.contains('slot-bottom') ? 22 : 10))))) + 'px'; };
+  fit();
+  if(window.ResizeObserver){ heroRO = new ResizeObserver(fit); ps.forEach(p=>heroRO.observe(p)); }
+}
 function render(opts){
   const r = route(), app = $('#app');
   const tab = r.name==='day' ? (r.arg===TODAY ? 'today' : 'week') : (r.name==='trip' || r.name==='trips') ? 'week' : r.name;
@@ -1408,6 +1416,7 @@ function render(opts){
   else if(r.name==='style') app.innerHTML = viewStyle(r.arg);
   else app.innerHTML = viewDay(r.name==='day' && r.arg ? r.arg : TODAY, opts && opts.settle);
   document.title = 'Wardrobe';
+  fitHero();
   const ob = $('#ownbody'); if(ob && $('#sheet').classList.contains('open')) ob.innerHTML = ownBody();
 }
 
@@ -1506,8 +1515,7 @@ function viewDay(date, settle){
   </div>
   ${!o.logged && !o.fromPlan && !o.scope ? `<div class="modes segs" role="group" aria-label="Kind of look">${Object.entries(MODES).map(([k,l])=>`<button type="button" class="label" data-mode="${k}" data-date="${date}" aria-pressed="${k===(o.mode||modeFor(date))}">${l}</button>`).join('')}</div>` : ''}
   ${bagRowHTML(o, date)}
-  <div class="acts">${actions}</div>
-  ${o.list.length ? (()=>{ const rt = ratingFor(date); return `<div class="rate" role="group" aria-label="Rate this look"><span class="label">This look</span><button type="button" class="label" data-rate="1" data-date="${date}" aria-pressed="${!!(rt&&rt.y)}">Love it</button><button type="button" class="label" data-rate="0" data-date="${date}" aria-pressed="${!!(rt&&!rt.y)}">Not for me</button></div>`; })() : ''}
+  <div class="acts main">${actions}</div>
   <nav class="strip" aria-label="This week">${strip}</nav>
   <section class="panel"><span class="cap">The look</span><ol class="notes">${notes}</ol>${o.list.length?`<div class="acts"><button type="button" class="btn ghost" data-act="tryon" data-date="${date}">${worthTrying(o, date) ? 'Worth trying on in ChatGPT' : 'Try it on in ChatGPT'}</button></div>`:''}</section>
   <section class="panel"><span class="cap">Colour and fabric</span><ul class="palette">${cf.join('')}</ul></section>
@@ -1773,6 +1781,10 @@ function sheetDormant(){
   openSheet(`<div class="bar"><span class="cap" id="sheetTitle">Not worn in six months</span><button type="button" class="linkish" data-close>Done</button></div><p class="caption pad" style="margin:12px 0 0">Tick anything you haven't worn since spring. Wearing it clears the mark.</p>${groups}`);
 }
 
+function ratingHTML(date){
+  const rt = ratingFor(date); if(!(rt || outfitFor(date).list.length)) return '';
+  return `<div class="rate" role="group" aria-label="Rate this look"><span class="label">This look</span><button type="button" class="label" data-rate="1" data-date="${date}" aria-pressed="${!!(rt&&rt.y)}">Love it</button><button type="button" class="label" data-rate="0" data-date="${date}" aria-pressed="${!!(rt&&!rt.y)}">Not for me</button></div>`;
+}
 function reactionsHTML(date){
   const entry = log().find(e=>e.date===date && e.source!=='sample'); if(!entry) return '';
   const rs = entry.reactions || [];
@@ -1809,7 +1821,7 @@ function viewLog(arg){
     <div class="field"><span class="cap">Mirror photo</span><div class="photo-in">${entry&&entry.photoPreview?`<img src="${entry.photoPreview}" alt="Mirror photo">`:''}<label class="linkish" for="photo">${entry&&entry.photoPreview?'Replace photo':'Add a photo'}</label>${(entry&&entry.photoPreview)||S.ui.photo?`<button type="button" class="linkish" data-act="rmlogphoto" data-date="${date}">Remove photo</button>`:''}<input type="file" id="photo" accept="image/*" class="sr"></div><span class="hint">${!(entry&&entry.photoPreview) && tryonFor([...sel]) ? 'You tried this look on in ChatGPT. Add a photo of the real thing and it takes the render’s place.' : 'Optional. Claude can match it to your pieces.'}</span></div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savelog" data-date="${date}">Save the log</button></div>
   </div>
-  ${entry?`<section class="panel"><span class="cap">How did it go?</span><p class="caption pad">React to the look or to a single piece. Two of the same reaction become a rule the app follows.</p><div id="reactions">${reactionsHTML(date)}</div></section>`:''}
+  ${entry?`<section class="panel"><span class="cap">How did it go?</span>${ratingHTML(date)}<p class="caption pad">React to the look or to a single piece. Two of the same reaction become a rule the app follows.</p><div id="reactions">${reactionsHTML(date)}</div></section>`:''}
   ${past.length?`<section class="panel"><span class="cap">Past days</span><ul class="history">${hr.html}</ul>${hr.btn}</section>`:''}
   <section class="panel"><span class="cap">Laundry</span><div class="field"><p class="caption" style="margin:0">${wash?`${wash} piece${wash>1?'s':''} in the wash.`:'Nothing in the wash. Mark pieces from their sheet.'}</p></div><div class="acts"><button type="button" class="btn ghost" data-act="laundry" ${wash?'':'disabled'}>I did my laundry</button></div></section>
   <section class="panel"><span class="cap">Settings</span><div class="field"><a class="linkish" href="#log/settings">Wardrobe data and sync</a></div></section>`;
