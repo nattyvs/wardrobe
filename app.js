@@ -69,7 +69,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cap1 = s => s ? s[0].toUpperCase()+s.slice(1) : s;
 function hash(str){ let h=2166136261; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return (h>>>0)/4294967295; }
-function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'),2200); }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); document.body.classList.add('toasting'); clearTimeout(toast.t); toast.t=setTimeout(()=>{ t.classList.remove('show'); document.body.classList.remove('toasting'); },2200); } // a toast and the sync note share one slot: the note steps aside while a toast shows
 
 /* ---------------- data access ---------------- */
 function closet(){ return S.closet || []; }
@@ -596,6 +596,7 @@ function slotsFrom(ids){
 const FACTORS = [['colour','Colour harmony'],['silhouette','Silhouette and proportion'],['coherence','Style coherence'],['texture','Texture and print'],['preference','Your preference'],['rotation','Wardrobe rotation']];
 const DEFAULT_W = {colour:.20, silhouette:.25, coherence:.20, texture:.10, preference:.15, rotation:.10};
 const MODES = {reliable:'Reliable', rediscover:'Rediscover', push:'Push my style'};
+const MODE_NOTE = {reliable:'Pieces you reach for.', rediscover:'Pieces not worn lately.', push:'Combinations you haven’t tried.'};
 function weights(){ const w = Object.assign({}, DEFAULT_W, (S.style && S.style.weights) || {}); const t = Object.values(w).reduce((a,b)=>a+b,0)||1; Object.keys(w).forEach(k=>w[k]/=t); return w; }
 const modeFor = date => (S.state.modes && S.state.modes[date]) || 'reliable';
 function lightOf(hex){ const m = /^#?([0-9a-f]{6})$/i.exec(hex||''); if(!m) return .5; const n = parseInt(m[1],16); return (Math.max(n>>16&255, n>>8&255, n&255) + Math.min(n>>16&255, n>>8&255, n&255))/510; }
@@ -1248,7 +1249,7 @@ function connReason(status){
   if(status===404) return "Couldn't find that repository.";
   if(status===429) return 'GitHub is limiting requests. Try again in a minute.';
   if(!status) return 'Offline.';
-  return `GitHub had a problem (${status}).`;
+  return 'GitHub is not responding. Try again in a minute.';
 }
 const connLine = () => S.connErr ? S.connErr + (S.real ? " Showing what's kept on this phone." : '') : '';
 function connError(status){ const e = new Error(''); e.status = status; e.reason = connReason(status); e.message = e.reason; return e; }
@@ -1267,10 +1268,10 @@ const ghSerial = fn => { const run = ghChain.then(fn, fn); ghChain = run.catch((
 async function ghSend(path, message, content, withSha){
   for(let attempt=0; ; attempt++){
     const body = {message, content}; if(withSha && S.sha[path]) body.sha = S.sha[path];
-    const r = await fetch(ghURL(path), {method:'PUT', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify(body)});
+    const r = await fetch(ghURL(path), {method:'PUT', headers:ghHeaders({'Content-Type':'application/json'}), body:JSON.stringify(body)}).catch(()=>{ throw connError(0); });
     if(r.ok) return r.json();
     const again = r.status===409 || (withSha && r.status===422) || r.status>=500;
-    if(!again || attempt>=3) throw new Error(withSha ? `Couldn't save ${path} (${r.status}).` : `Couldn't upload the photo (${r.status}).`);
+    if(!again || attempt>=3) throw new Error(withSha ? "Couldn't save to GitHub." : "Couldn't upload the photo to GitHub.");
     await sleep(600*(attempt+1));
     if(withSha) S.sha[path] = (await ghGet(path)).sha;
   }
@@ -1384,7 +1385,7 @@ const pushCloset = () => ghSerial(async()=>{
       S.closet = fresh.map(p=>Object.assign({}, p, S.state.edits[p.id]||{}));
       return;
     }
-    if(!(r.status===409 || r.status===422) || attempt>=2) throw new Error(`Couldn't save the closet (${r.status}).`);
+    if(!(r.status===409 || r.status===422) || attempt>=2) throw new Error("Couldn't save the closet to GitHub.");
     await sleep(600*(attempt+1));
   }
 });
@@ -1396,7 +1397,7 @@ function queuePush(what){
   persist();
   if(settings.sample) return; // sample edits stay on this phone and are never queued for GitHub
   LS.set('wd.pending', Object.assign(LS.get('wd.pending', {}), what));
-  if(!ghReady()) return;
+  if(!ghReady()){ updateNet(); return; }
   queuePush.what = Object.assign(queuePush.what||{}, what);
   clearTimeout(pushTimer);
   pushTimer = setTimeout(schedulePush, 900);
@@ -1517,7 +1518,7 @@ const REPEAT_ICON = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none"
 function sideBtn(p){ const t = twinOf(p); return t ? `<button type="button" class="side" data-piece="${esc(t.id)}" aria-label="Other side: ${esc(t.name)}">${art(t)}</button>` : ''; }
 function repeatBtn(id){
   const on = !!onRepeatSince(id);
-  return `<button type="button" class="rep" data-repeat="${esc(id)}" aria-pressed="${on}" aria-label="${on?'On repeat. Tap to clear.':'Mark as on repeat'}">${REPEAT_ICON}</button>`;
+  return `<button type="button" class="rep" data-repeat="${esc(id)}" aria-pressed="${on}" aria-label="On repeat" title="${on?'On repeat. Tap to clear.':'Mark as on repeat: wearing it a lot lately'}">${REPEAT_ICON}</button>`;
 }
 function viewDay(date, settle){
   const o = outfitFor(date), w = wx(date), occ = occasionFor(date), st = stats(date);
@@ -1570,7 +1571,7 @@ function viewDay(date, settle){
     ${(()=>{ const m = weatherMismatch(o, date); return m && S.state.swaps[date] ? `<p class="adjusted">${esc(m)} <button type="button" class="linkish" data-act="rebuildday" data-date="${date}">Build one for today's weather</button></p>` : ''; })()}
     ${o.fallback?`<p class="caption">${esc(o.fallback)}</p>`:''}
   </div>
-  ${!o.logged && !o.fromPlan && !o.scope ? `<div class="modes segs" role="group" aria-label="Kind of look">${Object.entries(MODES).map(([k,l])=>`<button type="button" class="label" data-mode="${k}" data-date="${date}" aria-pressed="${k===(o.mode||modeFor(date))}">${l}</button>`).join('')}</div>` : ''}
+  ${!o.logged && !o.fromPlan && !o.scope ? `<div class="modes segs" role="group" aria-label="Kind of look">${Object.entries(MODES).map(([k,l])=>`<button type="button" class="label" data-mode="${k}" data-date="${date}" aria-pressed="${k===(o.mode||modeFor(date))}">${l}</button>`).join('')}</div><p class="caption modenote">${MODE_NOTE[o.mode||modeFor(date)]||''}</p>` : ''}
   ${bagRowHTML(o, date)}
   <div class="acts main">${actions}</div>
   <nav class="strip" aria-label="This week">${strip}</nav>
@@ -1867,7 +1868,7 @@ function viewLog(arg){
   const hr = reveal('log.history', past, 14, (e,i,a)=>(i===0||monthOf(e.date)!==monthOf(a[i-1].date)?`<li class="mo"><span class="cap">${esc(monthOf(e.date))}</span></li>`:'')+histRow(e));
   const wash = closet().filter(p=>statusOf(p)==='wash').length;
   return `${masthead()}
-  <header class="pagehead"><h1 class="page">${date===TODAY?'Tonight':dayName(date)}</h1><p class="lede">What did you wear${date===TODAY?' today':` on ${esc(nice(date))}`}?</p></header>
+  <header class="pagehead"><h1 class="page">${date===TODAY?'Today’s log':dayName(date)}</h1><p class="lede">What did you wear${date===TODAY?' today':` on ${esc(nice(date))}`}?</p></header>
   <hr class="rule">
   <ul class="picklist">${planned.map(row).join('')}${others.map(row).join('')}</ul>
   <div class="segs" role="toolbar" aria-label="Add something else"><span class="label" style="color:var(--ink-2);padding-top:2px">Add</span>${cats.map(([k,l])=>`<button type="button" class="label" data-extra="${k}" aria-pressed="${extra===k}">${l}</button>`).join('')}</div>
@@ -1888,13 +1889,13 @@ const FEEL = {me:'Felt like me', fine:'Fine', notme:'Not me'};
 function viewSettings(){
   const when = S.synced ? new Date(S.synced).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'never';
   return `${masthead()}
-  <header class="pagehead"><h1 class="page">Settings</h1><p class="lede">Your closet, log and Claude's weekly plan live in a private GitHub repo.</p></header>
+  <header class="pagehead"><h1 class="page">Settings</h1><p class="lede">Your closet, log and plan live in a private GitHub repo.</p></header>
   <div class="stack">
     <div class="field"><span class="cap">Connection</span><p class="connline" role="status">${esc(settings.sample ? 'Showing the sample wardrobe.' : !S.real ? 'Not connected yet.' + (S.connErr ? ' ' + S.connErr : '') : S.connErr ? connLine() : 'Connected.')}</p></div>
     <div class="field"><label class="cap" for="repo">Data repo</label><input id="repo" value="${esc(settings.repo)}" autocomplete="off" spellcheck="false"><span class="hint">Owner and name, like nattyvs/wardrobe-private.</span></div>
     <div class="field"><label class="cap" for="token">GitHub token</label><input id="token" type="password" value="${esc(settings.token)}" autocomplete="off" spellcheck="false" placeholder="github_pat_…"><span class="hint">A fine-grained token with read and write access to that repo's contents. It stays on this phone.</span></div>
     <div class="toggles"><label class="toggle"><span>Sample wardrobe<small>Show the demo pieces instead of yours.</small></span><input type="checkbox" class="switch" id="sample" ${settings.sample?'checked':''}></label></div>
-    <div class="field"><span class="cap">Vision model</span><span class="hint">${visionDownloaded() ? `On this phone${Object.keys(embStore().items).length ? `, with ${Object.keys(embStore().items).length} of ${closet().filter(p=>p.photo).length} pieces learned` : ''}.` : 'Not downloaded yet. It downloads about 90 MB the first time you use "Do I already own this?" or "Find it in my closet".'}</span></div>
+    <div class="field"><span class="cap">Vision model</span><span class="hint">${visionDownloaded() ? `On this phone${Object.keys(embStore().items).length ? `, with ${Object.keys(embStore().items).length} of ${closet().filter(p=>p.photo).length} pieces learned` : ''}.` : 'Not downloaded yet. It downloads about 90 MB the first time you use “Do I already own this?” or “Find it in my closet”.'}</span></div>
     <div class="field"><a class="linkish" href="#trips">Trips and packing</a></div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savesettings">Save and sync</button><a class="btn ghost" href="#log">Back</a></div>
     <div class="field"><span class="hint">Last synced: ${esc(when)}. Forecast from Open-Meteo for ${esc(settings.city)}.</span></div>
@@ -1903,7 +1904,7 @@ function viewSettings(){
 
 /* ---------------- vision: a small image model that runs on the phone ----------------
    CLIP, through transformers.js, loaded only when first used. It compares pictures with the closet cut-outs.
-   It suggests; it never decides. Claude checks its matches in the Sunday review and writes corrections. */
+   It suggests; it never decides. Your corrections are kept in vision.json. */
 const VISION_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
 const VISION_MODEL = 'Xenova/clip-vit-base-patch32';
 const V = {lib:null, proc:null, model:null, loading:null, busy:'', pct:null, err:'', errRef:null, running:null};
@@ -1938,7 +1939,7 @@ async function visionReady(){
     V.model = await lib.CLIPVisionModelWithProjection.from_pretrained(VISION_MODEL, {progress_callback});
     LS.set('wd.vision', {ready:true, at:Date.now()});
     visionSay(''); return true;
-  })().catch(e=>{ V.loading = null; visionSay(''); throw new Error("The vision model couldn't load: "+(e && e.message || e)); });
+  })().catch(e=>{ V.loading = null; visionSay(''); throw new Error("The vision model couldn't load. Check your connection and try again."); });
   return V.loading;
 }
 // Cut-outs are transparent, so put every picture on white first. Optional crop as fractions [y0, y1].
@@ -2103,7 +2104,7 @@ function viewStyle(arg){
   const live = new Set(checksList().map(c=>(c.rule||'').trim())); // sentences the engine enforces
   const pane = STYLE_PANES.some(x=>x[0]===S.ui.stylePane) ? S.ui.stylePane : 'pieces';
   const whyOf = p => labelsOf(LOVE_WHY, (loved(p.id)||{}).why).join(' · ');
-  const lede = loves.length>=3 ? 'What you love, what you wore, what caught your eye.' : 'Show the app what you love, so the looks start to sound like you. Claude reads everything here and writes your rules.';
+  const lede = loves.length>=3 ? 'What you love, what you wore, what caught your eye.' : 'Show the app what you love, so the looks start to sound like you.';
   // Rules first: the most useful thing on the page.
   const appliedN = rulesL.filter(r=>live.has((r||'').trim())).length;
   if(rulesL.length && LS.get('wd.rulesSeen', null)==null) LS.set('wd.rulesSeen', rulesL.length);
@@ -2111,10 +2112,10 @@ function viewStyle(arg){
   const ruleRow = r => `<li>${esc(r)}${live.has((r||'').trim()) ? ' <span class="tag off" title="The looks are built to obey this one">Applied</span>' : ''}</li>`;
   const rr = reveal('style.rules', rulesL, 8, ruleRow);
   const rulesCard = rulesL.length
-    ? fold('style.rules', {cls:'panel rulescard', title:'What Claude has learned', count:rulesL.length, open:false,
+    ? fold('style.rules', {cls:'panel rulescard', title:'What the app has learned', count:rulesL.length, open:false,
         summary:`${appliedN ? `${appliedN} applied to the looks` : 'Not applied to the looks yet'}${fresh ? ` \u00b7 ${fresh} new` : ''}`,
         body:`<ul class="learned">${rr.html}</ul>${rr.btn}`})
-    : `<section class="panel rulescard"><span class="cap">What Claude has learned</span><p class="caption pad">Nothing yet. Once you have added a few loves, looks and pictures, Claude can read them.</p><div class="acts"><button type="button" class="btn ghost" data-act="readstyle">Read my style</button></div></section>`;
+    : `<section class="panel rulescard"><span class="cap">What the app has learned</span><p class="caption pad">Nothing yet. Add a few loves, looks and pictures first.</p><div class="acts"><button type="button" class="btn ghost" data-act="readstyle">Copy a prompt for Claude</button></div><p class="caption pad" style="margin:10px 0 0">Copies a prompt. Paste it into Claude to write your style rules.</p></section>`;
   const counts = {pieces:loves.length, looks:looks.length, tryons:tryons.length, inspo:ins.length};
   const seg = `<nav class="stylepanes segs" role="tablist" aria-label="Style">${STYLE_PANES.map(([k,l])=>`<button type="button" class="label" role="tab" data-stylepane="${k}" aria-pressed="${k===pane}">${l}${counts[k]?`<span class="n">${counts[k]}</span>`:''}</button>`).join('')}</nav>`;
   const head = (n, noun, href) => `<div class="panehead"><span class="caption">${n ? `${n} ${noun}` : ''}</span><a class="linkish" href="${href}">+ Add</a></div>`;
@@ -2271,7 +2272,7 @@ function viewTripForm(d){
     <div class="field"><span class="cap">What the days involve</span></div>
     <div class="toggles">${TRIP_ACTS.map(([k,l])=>`<label class="toggle"><span>${l}</span><input type="checkbox" class="switch" data-tact="${k}" ${d.activities.includes(k)?'checked':''}></label>`).join('')}
     <label class="toggle"><span>Carry-on only<small>Keeps shoes and layers to a minimum.</small></span><input type="checkbox" class="switch" id="tcarry" ${d.carryOn?'checked':''}></label>
-    <label class="toggle"><span>Laundry on the trip<small>About one wash a week. Off packs clothes for each day.</small></span><input type="checkbox" class="switch" id="tlaundry" ${d.laundry!==false?'checked':''}></label></div>
+    <label class="toggle"><span>Laundry on the trip<small>About one wash a week, so you pack less. Turn off to pack enough for every day.</small></span><input type="checkbox" class="switch" id="tlaundry" ${d.laundry!==false?'checked':''}></label></div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savetrip">Save trip</button><a class="btn ghost" href="${isNew?'#trips':'#trip/'+esc(d.id)}">Cancel</a></div>
     ${!isNew?`<div class="field"><button type="button" class="linkish" data-act="deltrip" data-id="${esc(d.id)}" style="justify-self:start">Delete this trip</button></div>`:''}
   </div>`;
@@ -2299,7 +2300,7 @@ function viewTrip(id, sub){
   ${gp.gaps.length?`<section class="gaps"><span class="label">Before you fly</span><ul>${gp.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></section>`:''}
   <section class="packing"><span class="cap">In the suitcase${packed.length?` · ${packed.length}`:''}</span>
   <div class="toggles"><label class="toggle"><span>Carry-on only<small>Two pairs of shoes at most, and one warm layer.</small></span><input type="checkbox" class="switch" id="tcarry-live" data-trip="${esc(t.id)}" ${t.carryOn?'checked':''}></label>
-  <label class="toggle"><span>Laundry on the trip<small>About one wash a week. Off packs clothes for each day.</small></span><input type="checkbox" class="switch" id="tlaundry-live" data-trip="${esc(t.id)}" ${t.laundry!==false?'checked':''}></label></div>
+  <label class="toggle"><span>Laundry on the trip<small>About one wash a week, so you pack less. Turn off to pack enough for every day.</small></span><input type="checkbox" class="switch" id="tlaundry-live" data-trip="${esc(t.id)}" ${t.laundry!==false?'checked':''}></label></div>
   <p class="caption pad" style="margin:14px 0 0">Add what you are already taking. Suggest fills in the rest around it, and the looks below show what the suitcase can do.</p>
   <div class="acts"><button type="button" class="btn" data-act="packadd" data-id="${esc(t.id)}">Add what I'm taking</button><button type="button" class="btn ghost" data-act="suggest" data-id="${esc(t.id)}">${(t.mine||[]).length ? 'Suggest the rest' : packed.length ? 'Suggest again' : 'Suggest a capsule'}</button></div>
   ${packed.length?tripBar+groups:`<p class="empty pad">Nothing packed yet. Add what you are taking, or tap Suggest a capsule.</p>`}</section>
@@ -2601,7 +2602,7 @@ async function sheetTryOn(date, given){
     <div class="field try-prompt"><label class="cap" for="tryprompt">Prompt</label><textarea id="tryprompt" rows="9" spellcheck="false">${esc(S.ui.try.prompt)}</textarea><span class="hint">Change the wording if you like. Copy takes whatever is in the box.</span></div>
     <div class="acts"><button type="button" class="btn" data-act="trycopy">Copy prompt</button><a class="btn ghost" href="https://chatgpt.com/" target="_blank" rel="noopener">Open ChatGPT</a></div>
     <p class="caption pad" style="margin:14px 0 0">Your photo goes to ChatGPT only. This app never sees it. Judge the shape and the colours; AI often changes a collar, a hem or a print, and your face may look off.</p>
-    <section class="try-result"><div class="field"><span class="cap">Got the picture back?</span></div><p class="caption pad">Save it here with your verdict. The app learns from it, and Claude looks at it on Sunday. Once you wear the look, your own photo takes its place.</p><div id="tryres">${tryResultBlock()}</div></section>`);
+    <section class="try-result"><div class="field"><span class="cap">Got the picture back?</span></div><p class="caption pad">Save it here with your verdict. The app learns from it. Once you wear the look, your own photo takes its place.</p><div id="tryres">${tryResultBlock()}</div></section>`);
   try{
     const {blob, cv} = await collage(o);
     const cur = S.ui.try; if(!cur || cur.token!==token) return;
@@ -2646,7 +2647,7 @@ function decideTryon(id, yes){
     learnFrom(sc, yes, 0.04);
   }
   if(yes && isoDate(x.date) && x.date>=TODAY) pinLook(x.date, x.items);
-  queuePush({style:true}); render(); toast(yes ? 'Settled. More like this.' : 'Settled. Claude will look at it on Sunday.');
+  queuePush({style:true}); render(); toast(yes ? 'Settled. More like this.' : 'Settled. It shapes future looks.');
 }
 function verdictWords(t){ return t.verdict==='y' ? 'You loved it' : t.verdict==='m' ? 'Not sure yet' : `Not for you${(t.off||[]).length ? ': '+t.off.map(k=>(OFF_TAGS.find(x=>x[0]===k)||[])[1].toLowerCase()).join(', ') : ''}`; }
 // Worth rendering: a look the app is least sure of. A push or rediscover day, or a main piece never worn.
@@ -2689,7 +2690,7 @@ async function saveTryon(){
   if(tr.sc && tr.verdict!=='m'){ S.style.ratings = (S.style.ratings||[]).concat([{date, items:tr.items, y:tr.verdict, mode:'tryon', src:'tryon', ref:id, f:tr.sc.f, at:Date.now()}]); learnFrom(tr.sc, tr.verdict, 0.04); }
   // Only a try-on of a real day's look is pinned to that day. Others (a piece's outfits, office ideas) are just saved.
   if(tr.verdict===true && isoDate(tr.date)) pinLook(date, tr.items);
-  queuePush({style:true}); closeSheet(); render(); toast(tr.verdict==='m' ? 'Saved. Settle it when you know.' : tr.verdict ? 'Saved. More like this.' : 'Saved. Claude will look at it on Sunday.');
+  queuePush({style:true}); closeSheet(); render(); toast(tr.verdict==='m' ? 'Saved. Settle it when you know.' : tr.verdict ? 'Saved. More like this.' : 'Saved. It shapes future looks.');
 }
 
 // Taking a picture out: hidden in the app at once, and the file is deleted from the private repo too.
@@ -2899,7 +2900,7 @@ document.addEventListener('click', async e=>{
   else if(act==='bagchange'){ sheetBag(t.dataset.date); }
   else if(act==='ownopen'){ sheetOwn(); }
   else if(act==='ownconfirm'){ LS.set('wd.ownok', true); sheetOwn(); }
-  else if(act==='readstyle'){ const ok = await copyText('Read my Style tab (data/style.json in my wardrobe-private repo) and write my style rules into "rules".'); toast(ok ? 'Copied. Paste it to Claude.' : "Couldn't copy that here."); }
+  else if(act==='readstyle'){ const ok = await copyText('Read my Style tab (data/style.json in my wardrobe-private repo) and write my style rules into "rules".'); toast(ok ? 'Prompt copied. Paste it into Claude.' : "Couldn't copy that here."); }
   else if(act==='tryon2look'){
     const tr = liveTryons().find(x=>x.id===t.dataset.id), real = tr && tryonWorn(tr); if(!real) return;
     const now = Date.now(), pv = real.photoPreview;
@@ -3074,7 +3075,8 @@ function updateNet(){
   const n = waitingCount(); let el = document.getElementById('netnote');
   if(navigator.onLine && !n){ if(el) el.remove(); return; }
   if(!el){ el = document.createElement('p'); el.id = 'netnote'; el.className = 'netnote'; el.setAttribute('role','status'); document.body.appendChild(el); }
-  el.textContent = navigator.onLine ? 'Syncing changes.' : (n ? 'Offline. Changes are kept on this phone and will sync later.' : 'Offline. Everything you see is kept on this phone.');
+  const canPush = ghReady() && S.real; // only say "Syncing" while a push can actually go out
+  el.textContent = !navigator.onLine ? (n ? 'Offline. Changes are kept on this phone and will sync later.' : 'Offline. Everything you see is kept on this phone.') : canPush ? 'Syncing changes.' : !ghReady() ? 'Kept on this phone. Connect GitHub to sync.' : 'Kept on this phone. Waiting for GitHub to connect.';
 }
 let syncing = false;
 async function syncNow(quiet){

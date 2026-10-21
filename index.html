@@ -323,6 +323,7 @@ button.tag{cursor:pointer}
 .days .olook .rowact{grid-column:1/-1;padding-left:84px}
 .days .rowact{padding:0 0 4px 84px;margin-top:-6px}
 .days .rowact .linkish{display:inline-flex;align-items:center;min-height:44px}
+body.toasting .netnote{visibility:hidden}
 body.sheet-open .toast{bottom:auto;top:calc(env(safe-area-inset-top,0px) + 14px)}
 .extras{padding:22px 0 8px;border-top:1px solid var(--rule-soft);margin-top:18px}
 .extras > .cap{display:block;padding:0 var(--gutter-r) 8px var(--gutter)}
@@ -471,6 +472,7 @@ h2.sec .n{font-size:12px;letter-spacing:0;margin-left:6px;color:var(--ink-2)}
 .modes{padding-top:2px;padding-bottom:0;gap:0;justify-content:space-between;overflow:visible}
 .modes button{position:relative;min-height:44px;padding:0 14px 0 0;color:var(--ink-2);white-space:nowrap}
 .modes button:last-child{padding-right:0}
+.modenote{margin:0;padding:0 var(--gutter-r) 6px var(--gutter)}
 .modes button[aria-pressed="true"]{color:var(--ink);font-weight:600;border-bottom:0}
 .modes button[aria-pressed="true"]::after{content:"";position:absolute;left:0;right:14px;bottom:9px;height:2px;background:var(--ink)}
 .modes button:last-child[aria-pressed="true"]::after{right:0}
