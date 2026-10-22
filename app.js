@@ -1878,7 +1878,7 @@ function reactionsHTML(date){
 function viewLog(arg){
   if(arg==='settings') return viewSettings();
   const date = arg, entry = log().find(e=>e.date===date && e.source!=='sample');
-  if(S.ui.logDate!==date){ S.ui.logDate = date; S.ui.photo = null; S.ui.render = null; S.ui.diff = null; }
+  if(S.ui.logDate!==date){ S.ui.logDate = date; S.ui.photo = null; S.ui.render = null; }
   const o = outfitFor(date);
   const sel = new Set(entry ? entry.items : o.list.map(x=>x.p.id));
   const extra = S.state.logExtra || '';
@@ -1901,7 +1901,7 @@ function viewLog(arg){
     <div class="field"><span class="cap">How did it feel?</span></div>
     <div class="feel" role="group" aria-label="How did it feel">${Object.entries(FEEL).map(([k,l])=>`<button type="button" data-feel="${k}" aria-pressed="${feel===k}">${l}</button>`).join('')}</div>
     <div class="field"><label class="cap" for="lognote">A note for next time</label><textarea id="lognote" rows="2" placeholder="Too warm by lunch. Scarf worked.">${esc(entry&&entry.note||'')}</textarea></div>
-    <div class="field"><span class="cap">Mirror photo and ChatGPT’s version</span><span class="hint">Add either or both. Side by side, Claude can see where the real fit differs from the render.</span></div>
+    <div class="field"><span class="cap">Mirror photo and ChatGPT’s version</span><span class="hint">Add either or both. Claude compares the two in the Sunday review and adjusts fit guesses and pairings.</span></div>
     <div id="compare">${compareHTML(date, entry, [...sel])}</div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savelog" data-date="${date}">Save the log</button></div>
   </div>
@@ -1911,18 +1911,15 @@ function viewLog(arg){
   <section class="panel"><span class="cap">Settings</span><div class="field"><a class="linkish" href="#log/settings">Wardrobe data and sync</a></div></section>`;
 }
 const FEEL = {me:'Felt like me', fine:'Fine', notme:'Not me'};
-// How the real thing differed from ChatGPT's render. Shape first: that is what a render gets wrong.
-const DIFF_TAGS = [['looser','Looser'],['tighter','Tighter'],['shorter','Shorter'],['longer','Longer'],['proportions','Proportions'],['drape','Fabric falls differently'],['colours','Colours'],['same','Spot on']];
 // Only pictures already on the phone: loading one from GitHub redraws the page and would drop unsaved ticks.
 const onPhone = (path, preview) => (path && S.photos[path]) || preview || '';
 function compareHTML(date, entry, items){
   const tr = !(entry && entry.renderPreview) && tryonFor(items);
   const mirror = S.ui.photo ? 'data:image/jpeg;base64,'+S.ui.photo.b64 : entry && onPhone(entry.photo, entry.photoPreview);
   const rend = S.ui.render ? 'data:image/jpeg;base64,'+S.ui.render.b64 : entry && entry.renderPreview ? onPhone(entry.render, entry.renderPreview) : tr ? onPhone(tr.photo, tr.preview) : '';
-  const diff = S.ui.diff || (entry && entry.diff) || [];
   const slot = (src, id, alt, act, note) => `<figure>${src ? `<img src="${src}" alt="${alt}">` : `<label class="ph" for="${id}"><span class="label">Add</span></label>`}<figcaption><span class="label">${alt}</span>${note?`<span class="hint">${note}</span>`:''}<span class="acts-inline"><label class="linkish" for="${id}">${src?'Replace':'Add a photo'}</label>${src && act ? `<button type="button" class="linkish" data-act="${act}" data-date="${date}">Remove</button>` : ''}</span></figcaption><input type="file" id="${id}" accept="image/*" class="sr"></figure>`;
   return `<div class="compare">${slot(mirror, 'photo', 'Mirror', 'rmlogphoto')}${slot(rend, 'renderphoto', 'ChatGPT', S.ui.render || (entry && entry.renderPreview) ? 'rmlogrender' : '', tr && rend && !S.ui.render ? 'From your try-on' : '')}</div>
-    ${mirror && rend ? `<div class="field"><span class="cap">What came out different?</span></div>${tagChips(DIFF_TAGS, diff, 'data-diff')}` : ''}`;
+    ${entry && entry.renderRead && mirror && rend && !S.ui.photo && !S.ui.render ? `<p class="caption pad render-read"><span class="label">Claude</span> ${esc(entry.renderRead)}</p>` : ''}`;
 }
 const refreshCompare = date => { const el = $('#compare'); if(el) el.innerHTML = compareHTML(date, log().find(e=>e.date===date && e.source!=='sample'), currentPicks()); };
 
@@ -2824,9 +2821,6 @@ document.addEventListener('click', async e=>{
     else { sib.forEach(b=>b.setAttribute('aria-pressed', 'false')); t.setAttribute('aria-pressed', on); }
     return; }
   if(t.dataset.tryv!==undefined && S.ui.try){ const v = t.dataset.tryv==='1' ? true : t.dataset.tryv==='m' ? 'm' : false; S.ui.try.verdict = S.ui.try.verdict===v ? null : v; refreshTry(); return; }
-  if(t.dataset.diff){ const k = t.dataset.diff, e = log().find(x=>x.date===S.ui.logDate && x.source!=='sample'); let a = (S.ui.diff || (e && e.diff) || []).slice();
-    a = a.includes(k) ? a.filter(x=>x!==k) : k==='same' ? ['same'] : [...a.filter(x=>x!=='same'), k];
-    S.ui.diff = a; refreshCompare(S.ui.logDate); return; }
   if(t.dataset.tryoff && S.ui.try){ const k = t.dataset.tryoff, a = S.ui.try.off||[]; S.ui.try.off = a.includes(k) ? a.filter(x=>x!==k) : [...a, k]; refreshTry(); return; }
   if(t.dataset.buycat || t.dataset.buycol || t.dataset.buypat){ const b = S.ui.buy; if(t.dataset.buycat) b.cat = t.dataset.buycat; if(t.dataset.buycol) b.colour = t.dataset.buycol; if(t.dataset.buypat) b.pattern = t.dataset.buypat; render(); return; }
   if(t.dataset.love){ toggleLove(t.dataset.love); return; }
@@ -2960,7 +2954,6 @@ document.addEventListener('click', async e=>{
     const patch = {items, source:'tick', feel: fb ? fb.dataset.feel : null, note: ($('#lognote')||{}).value || ''};
     if(S.ui.photo){ patch.photoPreview = S.ui.photo.preview; if(ghReady()){ const path = `data/inbox/mirror-${d}-${Date.now()}.jpg`; patch.photo = await uploadPhoto(path, S.ui.photo.b64, `Mirror photo ${d}`); } S.ui.photo = null; }
     if(S.ui.render){ patch.renderPreview = S.ui.render.preview; if(ghReady()){ const path = `data/inbox/render-${d}-${Date.now()}.jpg`; patch.render = await uploadPhoto(path, S.ui.render.b64, `ChatGPT render ${d}`); } S.ui.render = null; }
-    if(S.ui.diff){ patch.diff = S.ui.diff; S.ui.diff = null; }
     upsertLog(d, patch); S.state.logExtra = '';
     const tro = patch.photoPreview && tryonFor(items);
     if(tro){ tro.wornOn = d; tro.updated = Date.now(); queuePush({style:true}); }
