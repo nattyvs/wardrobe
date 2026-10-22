@@ -609,7 +609,7 @@ const tagsOf = p => p.styleTags && p.styleTags.length ? p.styleTags : [];
 function ratedPairs(){
   if(S.ui.memo.rated) return S.ui.memo.rated;
   const up = new Set(), down = new Set();
-  ((S.style && S.style.ratings) || []).forEach(r=>{ const ids = r.items||[]; ids.forEach(a=>ids.forEach(b=>{ if(a<b) (r.y ? up : down).add(a+'|'+b); })); });
+  ((S.style && S.style.ratings) || []).forEach(r=>{ const ids = r.items||[]; if(r.y==null) return; ids.forEach(a=>ids.forEach(b=>{ if(a<b) (r.y ? up : down).add(a+'|'+b); })); });
   return (S.ui.memo.rated = {up, down});
 }
 function lookScore(slots, date, opts){
@@ -743,12 +743,13 @@ function buildOutfit(date, opts){
   pick.mode = mode; pick.fallback = fallback;
   return pick;
 }
-function rateLook(date, y){
+// v is 'y' (love it), 'ok' (it's fine) or 'n' (not for me). Fine is wearable but not a favourite, so it teaches nothing.
+function rateLook(date, v){
   const o = outfitFor(date); if(!o || !o.list || !o.list.length) return;
   const sc = o.score || lookScore(o.slots, date, {mode:o.mode});
-  const items = o.list.map(x=>x.p.id);
-  S.style.ratings = ((S.style.ratings||[]).filter(r=>r.date!==date || r.src)).concat([{date, items, y, mode:o.mode||'reliable', f:sc.f, at:Date.now()}]);
-  learnFrom(sc, y, 0.08); if(y) pinLook(date, items);
+  const items = o.list.map(x=>x.p.id), y = v==='y' ? true : v==='n' ? false : null;
+  S.style.ratings = ((S.style.ratings||[]).filter(r=>r.date!==date || r.src)).concat([{date, items, y, v, mode:o.mode||'reliable', f:sc.f, at:Date.now()}]);
+  if(y!==null) learnFrom(sc, y, 0.08); if(y) pinLook(date, items);
   queuePush({style:true});
 }
 // Move weight towards the factors that were high in looks she liked, away from them in looks she didn't.
@@ -1864,7 +1865,7 @@ function sheetDormant(){
 
 function ratingHTML(date){
   const rt = ratingFor(date); if(!(rt || outfitFor(date).list.length)) return '';
-  return `<div class="rate" role="group" aria-label="Rate this look"><span class="label">This look</span><button type="button" class="label" data-rate="1" data-date="${date}" aria-pressed="${!!(rt&&rt.y)}">Love it</button><button type="button" class="label" data-rate="0" data-date="${date}" aria-pressed="${!!(rt&&!rt.y)}">Not for me</button></div>`;
+  return `<div class="rate" role="group" aria-label="Rate this look"><span class="label">This look</span><button type="button" class="label" data-rate="y" data-date="${date}" aria-pressed="${!!rt&&rt.y===true}">Love it</button><button type="button" class="label" data-rate="ok" data-date="${date}" aria-pressed="${!!rt&&rt.y==null}">It’s fine</button><button type="button" class="label" data-rate="n" data-date="${date}" aria-pressed="${!!rt&&rt.y===false}">Not for me</button></div>`;
 }
 function reactionsHTML(date){
   const entry = log().find(e=>e.date===date && e.source!=='sample'); if(!entry) return '';
@@ -1877,6 +1878,7 @@ function reactionsHTML(date){
 function viewLog(arg){
   if(arg==='settings') return viewSettings();
   const date = arg, entry = log().find(e=>e.date===date && e.source!=='sample');
+  if(S.ui.logDate!==date){ S.ui.logDate = date; S.ui.photo = null; S.ui.render = null; S.ui.diff = null; }
   const o = outfitFor(date);
   const sel = new Set(entry ? entry.items : o.list.map(x=>x.p.id));
   const extra = S.state.logExtra || '';
@@ -1899,7 +1901,8 @@ function viewLog(arg){
     <div class="field"><span class="cap">How did it feel?</span></div>
     <div class="feel" role="group" aria-label="How did it feel">${Object.entries(FEEL).map(([k,l])=>`<button type="button" data-feel="${k}" aria-pressed="${feel===k}">${l}</button>`).join('')}</div>
     <div class="field"><label class="cap" for="lognote">A note for next time</label><textarea id="lognote" rows="2" placeholder="Too warm by lunch. Scarf worked.">${esc(entry&&entry.note||'')}</textarea></div>
-    <div class="field"><span class="cap">Mirror photo</span><div class="photo-in">${entry&&entry.photoPreview?`<img src="${entry.photoPreview}" alt="Mirror photo">`:''}<label class="linkish" for="photo">${entry&&entry.photoPreview?'Replace photo':'Add a photo'}</label>${(entry&&entry.photoPreview)||S.ui.photo?`<button type="button" class="linkish" data-act="rmlogphoto" data-date="${date}">Remove photo</button>`:''}<input type="file" id="photo" accept="image/*" class="sr"></div><span class="hint">${!(entry&&entry.photoPreview) && tryonFor([...sel]) ? 'You tried this look on in ChatGPT. Add a photo of the real thing and it takes the render’s place.' : 'Optional. Claude can match it to your pieces.'}</span></div>
+    <div class="field"><span class="cap">Mirror photo and ChatGPT’s version</span><span class="hint">Add either or both. Side by side, Claude can see where the real fit differs from the render.</span></div>
+    <div id="compare">${compareHTML(date, entry, [...sel])}</div>
     <div class="acts" style="padding-top:0"><button type="button" class="btn" data-act="savelog" data-date="${date}">Save the log</button></div>
   </div>
   ${entry?`<section class="panel"><span class="cap">How did it go?</span>${ratingHTML(date)}<p class="caption pad">React to the look or to a single piece. Two of the same reaction become a rule the app follows.</p><div id="reactions">${reactionsHTML(date)}</div></section>`:''}
@@ -1908,6 +1911,20 @@ function viewLog(arg){
   <section class="panel"><span class="cap">Settings</span><div class="field"><a class="linkish" href="#log/settings">Wardrobe data and sync</a></div></section>`;
 }
 const FEEL = {me:'Felt like me', fine:'Fine', notme:'Not me'};
+// How the real thing differed from ChatGPT's render. Shape first: that is what a render gets wrong.
+const DIFF_TAGS = [['looser','Looser'],['tighter','Tighter'],['shorter','Shorter'],['longer','Longer'],['proportions','Proportions'],['drape','Fabric falls differently'],['colours','Colours'],['same','Spot on']];
+// Only pictures already on the phone: loading one from GitHub redraws the page and would drop unsaved ticks.
+const onPhone = (path, preview) => (path && S.photos[path]) || preview || '';
+function compareHTML(date, entry, items){
+  const tr = !(entry && entry.renderPreview) && tryonFor(items);
+  const mirror = S.ui.photo ? 'data:image/jpeg;base64,'+S.ui.photo.b64 : entry && onPhone(entry.photo, entry.photoPreview);
+  const rend = S.ui.render ? 'data:image/jpeg;base64,'+S.ui.render.b64 : entry && entry.renderPreview ? onPhone(entry.render, entry.renderPreview) : tr ? onPhone(tr.photo, tr.preview) : '';
+  const diff = S.ui.diff || (entry && entry.diff) || [];
+  const slot = (src, id, alt, act, note) => `<figure>${src ? `<img src="${src}" alt="${alt}">` : `<label class="ph" for="${id}"><span class="label">Add</span></label>`}<figcaption><span class="label">${alt}</span>${note?`<span class="hint">${note}</span>`:''}<span class="acts-inline"><label class="linkish" for="${id}">${src?'Replace':'Add a photo'}</label>${src && act ? `<button type="button" class="linkish" data-act="${act}" data-date="${date}">Remove</button>` : ''}</span></figcaption><input type="file" id="${id}" accept="image/*" class="sr"></figure>`;
+  return `<div class="compare">${slot(mirror, 'photo', 'Mirror', 'rmlogphoto')}${slot(rend, 'renderphoto', 'ChatGPT', S.ui.render || (entry && entry.renderPreview) ? 'rmlogrender' : '', tr && rend && !S.ui.render ? 'From your try-on' : '')}</div>
+    ${mirror && rend ? `<div class="field"><span class="cap">What came out different?</span></div>${tagChips(DIFF_TAGS, diff, 'data-diff')}` : ''}`;
+}
+const refreshCompare = date => { const el = $('#compare'); if(el) el.innerHTML = compareHTML(date, log().find(e=>e.date===date && e.source!=='sample'), currentPicks()); };
 
 function viewSettings(){
   const when = S.synced ? new Date(S.synced).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'never';
@@ -2720,6 +2737,12 @@ function removeTryon(id){
   if(path){ delete S.photos[path]; if(ghReady()) ghDelete(path); }
   queuePush({style:true});
 }
+function removeLogRender(date){
+  const e = log().find(x=>x.date===date && x.source!=='sample'); if(!e) return;
+  const path = e.render; upsertLog(date, {render:null, renderPreview:null});
+  if(path){ delete S.photos[path]; if(ghReady()) ghDelete(path); }
+  queuePush({log:true});
+}
 function removeWornPhoto(date){
   const e = log().find(x=>x.date===date && x.source!=='sample'); if(!e) return;
   const path = e.photo; upsertLog(date, {photo:null, photoPreview:null});
@@ -2801,12 +2824,15 @@ document.addEventListener('click', async e=>{
     else { sib.forEach(b=>b.setAttribute('aria-pressed', 'false')); t.setAttribute('aria-pressed', on); }
     return; }
   if(t.dataset.tryv!==undefined && S.ui.try){ const v = t.dataset.tryv==='1' ? true : t.dataset.tryv==='m' ? 'm' : false; S.ui.try.verdict = S.ui.try.verdict===v ? null : v; refreshTry(); return; }
+  if(t.dataset.diff){ const k = t.dataset.diff, e = log().find(x=>x.date===S.ui.logDate && x.source!=='sample'); let a = (S.ui.diff || (e && e.diff) || []).slice();
+    a = a.includes(k) ? a.filter(x=>x!==k) : k==='same' ? ['same'] : [...a.filter(x=>x!=='same'), k];
+    S.ui.diff = a; refreshCompare(S.ui.logDate); return; }
   if(t.dataset.tryoff && S.ui.try){ const k = t.dataset.tryoff, a = S.ui.try.off||[]; S.ui.try.off = a.includes(k) ? a.filter(x=>x!==k) : [...a, k]; refreshTry(); return; }
   if(t.dataset.buycat || t.dataset.buycol || t.dataset.buypat){ const b = S.ui.buy; if(t.dataset.buycat) b.cat = t.dataset.buycat; if(t.dataset.buycol) b.colour = t.dataset.buycol; if(t.dataset.buypat) b.pattern = t.dataset.buypat; render(); return; }
   if(t.dataset.love){ toggleLove(t.dataset.love); return; }
   if(t.dataset.vfb){ const ok = tapMatch(t.dataset.ref, t.dataset.id, t.dataset.vfb==='1', t.dataset.region); render(); toast(ok===true ? 'Right. It will find this one more easily.' : ok===false ? "Got it. It won't suggest that here, or for pictures like it." : 'Cleared'); return; }
   if(t.dataset.mode){ S.state.modes[t.dataset.date] = t.dataset.mode; delete S.state.swaps[t.dataset.date]; queuePush({state:true}); render(); toast(MODES[t.dataset.mode]); return; }
-  if(t.dataset.rate!==undefined){ const y = t.dataset.rate==='1'; rateLook(t.dataset.date, y); render(); toast(y ? 'Noted. More like this.' : 'Noted. Less like this.'); return; }
+  if(t.dataset.rate!==undefined){ const v = t.dataset.rate; rateLook(t.dataset.date, v); render(); toast(v==='y' ? 'Noted. More like this.' : v==='ok' ? 'Noted. Fine to wear again.' : 'Noted. Less like this.'); return; }
   if(t.dataset.lovewhy){ const id = t.dataset.lovewhy, v = S.style.loves[id] || (S.style.loves[id] = {at:TODAY, why:[]}); const k = t.dataset.why; v.why = (v.why||[]).includes(k) ? v.why.filter(x=>x!==k) : [...(v.why||[]), k]; t.setAttribute('aria-pressed', v.why.includes(k)); queuePush({style:true}); render(); return; }
   if(t.dataset.lookcat){ S.ui.lookCat = t.dataset.lookcat; render(); return; }
   if(t.dataset.lookocc){ S.ui.look.occ = t.dataset.lookocc; render(); return; }
@@ -2868,9 +2894,16 @@ document.addEventListener('click', async e=>{
     if(t.dataset.kind==='tryon') removeTryon(t.dataset.id); else removeWornPhoto(t.dataset.id);
     render(); toast('Photo removed'); return;
   }
+  if(act==='rmlogrender'){
+    const d = t.dataset.date;
+    if(S.ui.render){ S.ui.render = null; refreshCompare(d); toast('Photo removed'); return; }
+    const key = 'pic/render/'+d;
+    if(S.ui.confirmRm!==key){ S.ui.confirmRm = key; t.textContent = 'Tap again to remove'; return; }
+    S.ui.confirmRm = null; removeLogRender(d); refreshCompare(d); toast('Photo removed'); return;
+  }
   if(act==='rmlogphoto'){
     const d = t.dataset.date;
-    if(S.ui.photo){ S.ui.photo = null; render(); toast('Photo removed'); return; }
+    if(S.ui.photo){ S.ui.photo = null; refreshCompare(d); toast('Photo removed'); return; }
     const key = 'pic/worn/'+d;
     if(S.ui.confirmRm!==key){ S.ui.confirmRm = key; t.textContent = 'Tap again to remove'; return; }
     S.ui.confirmRm = null; removeWornPhoto(d); render(); toast('Photo removed'); return;
@@ -2926,10 +2959,12 @@ document.addEventListener('click', async e=>{
     const fb = document.querySelector('[data-feel][aria-pressed="true"]');
     const patch = {items, source:'tick', feel: fb ? fb.dataset.feel : null, note: ($('#lognote')||{}).value || ''};
     if(S.ui.photo){ patch.photoPreview = S.ui.photo.preview; if(ghReady()){ const path = `data/inbox/mirror-${d}-${Date.now()}.jpg`; patch.photo = await uploadPhoto(path, S.ui.photo.b64, `Mirror photo ${d}`); } S.ui.photo = null; }
+    if(S.ui.render){ patch.renderPreview = S.ui.render.preview; if(ghReady()){ const path = `data/inbox/render-${d}-${Date.now()}.jpg`; patch.render = await uploadPhoto(path, S.ui.render.b64, `ChatGPT render ${d}`); } S.ui.render = null; }
+    if(S.ui.diff){ patch.diff = S.ui.diff; S.ui.diff = null; }
     upsertLog(d, patch); S.state.logExtra = '';
     const tro = patch.photoPreview && tryonFor(items);
     if(tro){ tro.wornOn = d; tro.updated = Date.now(); queuePush({style:true}); }
-    queuePush({log:true}); render(); toast(tro ? 'Saved. Your photo now replaces the try-on.' : 'Saved');
+    queuePush({log:true}); render(); toast('Saved');
   }
   else if(act==='savepiece'){
     const p = piece(t.dataset.id); if(!p) return;
@@ -3052,15 +3087,9 @@ document.addEventListener('change', async e=>{
   if(el.id==='tlaundry-live'){ const tr = tripById(el.dataset.trip); if(tr){ tr.laundry = el.checked; tr.updated = Date.now(); queuePush({trips:true}); render(); toast(el.checked ? 'Laundry on the trip. Suggest again to apply it.' : 'No laundry. Suggest again to apply it.'); } return; }
   if(el.id==='tcarry-live'){ const tr = tripById(el.dataset.trip); if(tr){ tr.carryOn = el.checked; tr.updated = Date.now(); queuePush({trips:true}); render(); toast(el.checked ? 'Carry-on only. Suggest again to apply it.' : 'Checked bag. Suggest again to apply it.'); } return; }
   if(el.id==='prepeat'){ toggleRepeat(el.dataset.id); const n = $('#repnote'), rep = onRepeatSince(el.dataset.id); if(n) n.textContent = rep ? `Since ${shortDate(rep)}. Fades after ${ON_REPEAT_DAYS} days.` : 'Wearing this a lot lately. No need to log each day.'; return; }
-  if(el.id==='photo' && el.files[0]){
-    const f = el.files[0];
-    const img = await createImageBitmap(f).catch(()=>null); if(!img){ toast("That photo couldn't be read."); return; }
-    const k = Math.min(1, 1400/Math.max(img.width, img.height)), cv = document.createElement('canvas');
-    cv.width = Math.round(img.width*k); cv.height = Math.round(img.height*k); cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
-    const url = cv.toDataURL('image/jpeg', .82);
-    const small = document.createElement('canvas'); const k2 = 160/Math.max(cv.width,cv.height); small.width=Math.round(cv.width*k2); small.height=Math.round(cv.height*k2); small.getContext('2d').drawImage(cv,0,0,small.width,small.height);
-    S.ui.photo = {b64:url.split(',')[1], preview: small.toDataURL('image/jpeg', .7)};
-    const wrap = el.closest('.photo-in'); let im = wrap.querySelector('img'); if(!im){ im = document.createElement('img'); im.alt='Mirror photo'; wrap.prepend(im); } im.src = S.ui.photo.preview;
+  if((el.id==='photo' || el.id==='renderphoto') && el.files[0]){
+    const ph = await readPhoto(el.files[0]); if(!ph){ toast("That photo couldn't be read."); return; }
+    S.ui[el.id==='photo' ? 'photo' : 'render'] = ph; refreshCompare(S.ui.logDate);
     toast('Photo added. Save the log to keep it.');
   }
 });
